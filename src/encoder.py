@@ -1,14 +1,17 @@
 # encoder.py
-import torch
-import torch.nn as nn
+import tensorflow as tf
+from tensorflow.keras import layers, models
 
-class Encoder(nn.Module):
-    def __init__(self, input_dim, hidden=64, out_dim=32):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden), nn.ReLU(),
-            nn.Linear(hidden, out_dim)
-        )
+class Encoder(tf.keras.Model):
+    """
+    Maps heterogeneous device state arrays into fixed-size embeddings.
+    """
+    def __init__(self, input_dim, output_dim):
+        super(Encoder, self).__init__()
+        self.dense1 = layers.Dense(output_dim * 2, activation="relu")
+        self.dense2 = layers.Dense(output_dim, activation="relu")
 
-    def forward(self, x):
-        return self.net(x)
+    def call(self, x):
+        x = self.dense1(x)
+        x = self.dense2(x)
+        return x
