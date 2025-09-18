@@ -2,6 +2,7 @@ import random
 import numpy as np
 import pickle
 import pandas as pd
+import user
 
 class Servers:
     """
@@ -55,7 +56,7 @@ class Servers:
         downlink = download_bandwidth * 1000
         return (message_size / uplink) + (message_size / downlink)
     
-    def _get_computation_delay(self, server_index):
+    def _get_computation_delay(self, process_id):
         """
         Estimate computation delay for a given node using server data.
         Returns the value only if the Combination column is 'd', 'dd', or 'ddd', else returns 1e9.
@@ -64,15 +65,9 @@ class Servers:
         Returns:
             float: Computation delay or 1e9 if not matching required combinations.
         """
-        # Filter rows for the given server_index (1-based)
-        rows = self.server_data.iloc[server_index-1]
-        combination = rows['Combination']
-        if combination in ['d', 'dd', 'ddd']:
-            return rows['Execution Time (seconds)']
-        else:
-            return 1e9
+        return self.server_data.iloc[process_id]['Execution Time (seconds)']
     
-    def get_delays(self, state, server_index):
+    def get_delays(self, state, server_index, request: user.Request):
         """
         Get the total delay (propagation, transmission, computation) for a node.
         Args:
@@ -83,7 +78,7 @@ class Servers:
         """
         propagation_delay_for_node = self._get_propogation_delay(state['LOAD'][server_index])
         tramission_delay_for_node = self._get_tramission_delay(state['MESSAGE_SIZE'] , state['BANDWIDTH'] / state['LOAD'][server_index] ,state['BANDWIDTH']/ state['LOAD'][server_index])
-        computation_delay_for_node = self._get_computation_delay(server_index)
+        computation_delay_for_node = self._get_computation_delay(request.process_id)
         return propagation_delay_for_node + tramission_delay_for_node + computation_delay_for_node
 
 
