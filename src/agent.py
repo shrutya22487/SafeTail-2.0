@@ -13,9 +13,15 @@ from typing import List
 
 def get_subsets(fullset):
     """Helper: return all non-empty subsets of a set"""
+    
+    # Converting set to list for indexing
     listrep = list(fullset)
     subsets = []
+    
+    # There are 2^n subsets for a set of size n
+    # Looping over all the subsets
     for i in range(2**len(listrep)):
+        # Building each subset using bitmasking
         subset = []
         for k in range(len(listrep)):
             if i & 1 << k:
