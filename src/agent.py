@@ -7,7 +7,6 @@ import tensorflow.keras as keras
 from keras.layers import Dense
 from keras.optimizers import Adam
 from encoder import Encoder
-from controller import Controller
 import servers
 import user
 from typing import List
@@ -44,7 +43,6 @@ def get_state_input(state):
             output.append(i)
     return output
 
-# TODO (@theshamiksinha): Do not import controller here, instead import this class in controller and initialize it there
 class DQNAgent:
     def __init__(self, states, actions, alpha, reward_gamma, epsilon,
                  epsilon_min, epsilon_decay, batch_size, beta,
@@ -83,22 +81,7 @@ class DQNAgent:
         self.action = []
         self.load_arr = []
 
-        # Controller for reward calculation
-        self.controller = Controller()
-
         self.request = request
-    
-    def _get_min_delay(self, state, servers_to_be_queried):
-        """
-        Query the servers and get the minimum delay among them.
-        """
-        min_delay = float('inf')
-        
-        servers_obj = servers.Servers()
-
-        for server in servers_to_be_queried:
-            min_delay = min(min_delay, servers_obj.get_delays(state, server, self.request))
-        return min_delay
 
     def build_model(self, encoded_dim):
         model = keras.Sequential() 
@@ -160,17 +143,28 @@ class DQNAgent:
 
         self.loss.append(hist.history['loss'][0])
         self.val_loss.append(hist.history['val_loss'][0])
+        
+    def get_min_delay(self, state, servers_to_be_queried):
+        """
+        Query the servers and get the minimum delay among them.
+        """
+        min_delay = float('inf')
+        
+        servers_obj = servers.Servers()
+
+        for server in servers_to_be_queried:
+            min_delay = min(min_delay, servers_obj.get_delays(state, server, self.request))
+        return min_delay
 
     # TODO (@medhakashyap): Modify reward function as needed
     def reward(self, action, state):
         """
-        Uses Controller to compute min latency among chosen servers.
+        Used to compute min latency among chosen servers.
         """
         MEDIAN_LATENCY = self.median_computation_delay
 
         servers_to_be_queried = action
-        # TODO (@theshamiksinha) modify this 
-        obs_latency = self.controller._get_min_delay(state, servers_to_be_queried)
+        obs_latency = self.get_min_delay(state, servers_to_be_queried)
 
         # same reward structure as before
         if abs(obs_latency - MEDIAN_LATENCY) < 1000:
