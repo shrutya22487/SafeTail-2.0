@@ -11,33 +11,28 @@ from typing import List
 
 class Controller:
     def __init__(self, requests : List[user.Request], input_dim=10, output_dim=5):
+        import constants
         self.requests = requests
-        # add encoder here
-        # add any other initialization you need
-        self.agent = agent.DQNAgent()
-        self.encoder = agent.Encoder(input_dim, output_dim)
-        self.server_state = pd.read_csv('data/server_state.csv').iloc[:, 1:6]
-    
-    def _merge_server_state_with_request(self):
-        """
-        Reads server_data.csv and assigns a random process_id to each request.
-        The process_id is a random row index where Current Script is 'detect.py'.
-        """
-        df = pd.read_csv('data/server_data.csv')
-        detect_indices = df.index[df['Current Script'] == 'detect.py'].tolist()
-
-        if detect_indices:
-            for req in self.requests:
-                req.process_id = random.choice(detect_indices)
-                req.cpu_usage = df[req.process_id]['CPU Usage']
-                req.ram_usage = df[req.process_id]['RAM Usage']
-                req.server_state = self.server_state.sample(n=1).iloc[0].tolist()
-        else:
-            raise ValueError("No entries found with 'Current Script' as 'detect.py'")
+        self.agent = agent.DQNAgent(
+            nS=constants.nS,
+            nA=constants.nA,
+            alpha=constants.alpha,
+            gamma=constants.discount_rate,
+            epsilon=1.0,
+            epsilon_min=0.01,
+            epsilon_decay=constants.gamma_decay,
+            batch_size=constants.batch_size,
+            beta=constants.beta,
+            median_computation_delay=constants.median_computation_delay,
+            learning_rate=constants.learning_rate,
+            episodes=constants.no_of_episodes
+        )
     
     def run(self):
-        self._merge_server_state_with_request()
-        #connect with contoller here and pass the requests to it
-        
-        
+        """
+        Pass each request object directly to the agent for processing.
+        """
+        for req in self.requests:
+            self.agent.process_request(req)
     
+

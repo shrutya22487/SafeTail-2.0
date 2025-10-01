@@ -67,17 +67,16 @@ class Servers:
         """
         return self.server_data.iloc[process_id]['Execution Time (seconds)']
     
-    def get_delays(self, state, server_index, request: user.Request):
+    def get_delays(self, server_index, request: user.Request):
         """
         Get the total delay (propagation, transmission, computation) for a node.
         Args:
-            state (dict): State dictionary containing 'LOAD', 'MESSAGE_SIZE', and 'BANDWIDTH'.
             server_index (int): Node index (1-based).
         Returns:
             float: Total delay for the node.
         """
-        propagation_delay_for_node = self._get_propogation_delay(state['LOAD'][server_index])
-        tramission_delay_for_node = self._get_tramission_delay(state['MESSAGE_SIZE'] , state['BANDWIDTH'] / state['LOAD'][server_index] ,state['BANDWIDTH']/ state['LOAD'][server_index])
+        propagation_delay_for_node = self._get_propogation_delay(request.load[server_index])
+        tramission_delay_for_node = self._get_tramission_delay(request.message_size , request.bandwidth / request.load[server_index] , request.bandwidth / request.load[server_index])
         computation_delay_for_node = self._get_computation_delay(request.process_id)
         return propagation_delay_for_node + tramission_delay_for_node + computation_delay_for_node
 
