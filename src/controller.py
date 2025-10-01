@@ -7,17 +7,18 @@ import time
 import math
 import servers
 import user
+import constants
 from typing import List
 
 class Controller:
     def __init__(self, requests : List[user.Request], input_dim=10, output_dim=5):
-        import constants
+
         self.requests = requests
         self.agent = agent.DQNAgent(
-            nS=constants.nS,
-            nA=constants.nA,
+            states=constants.nS,
+            actions=constants.nA,
             alpha=constants.alpha,
-            gamma=constants.discount_rate,
+            reward_gamma=constants.discount_rate,
             epsilon=1.0,
             epsilon_min=0.01,
             epsilon_decay=constants.gamma_decay,
@@ -25,9 +26,11 @@ class Controller:
             beta=constants.beta,
             median_computation_delay=constants.median_computation_delay,
             learning_rate=constants.learning_rate,
-            episodes=constants.no_of_episodes
-        )
-    
+            task=None,
+            epochs=constants.no_of_episodes,
+            request=None  # will be set per request
+        )    
+        
     def run(self):
         """
         Pass each request object directly to the agent for processing.
@@ -35,4 +38,3 @@ class Controller:
         for req in self.requests:
             self.agent.process_request(req)
     
-

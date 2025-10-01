@@ -161,6 +161,18 @@ class DQNAgent:
         for server in servers_to_be_queried:
             min_delay = min(min_delay, servers_obj.get_delays(state, server, self.request))
         return min_delay
+    
+    def process_request(self, request: user.Request):
+        self.request = request  # store current request
+
+        state = request.to_state()  # get current state
+        next_state = request.get_next_state()  # simulate next state (can be same for now)
+
+        action_subset, action_index = self.get_action(state)
+        reward = self.reward(action_subset, state)
+
+        self.store(state, action_index, reward, next_state)
+
 
     # TODO (@medhakashyap): Modify reward function as needed
     def reward(self, action, state):
