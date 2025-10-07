@@ -3,6 +3,7 @@ import numpy as np
 import pickle
 import pandas as pd
 import user
+import computation_delay_regressor
 
 class Servers:
     """
@@ -57,15 +58,7 @@ class Servers:
         return (message_size / uplink) + (message_size / downlink)
     
     def _get_computation_delay(self, process_id):
-        """
-        Estimate computation delay for a given node using server data.
-        Returns the value only if the Combination column is 'd', 'dd', or 'ddd', else returns 1e9.
-        Args:
-            server_index (int): Node index (1-based).
-        Returns:
-            float: Computation delay or 1e9 if not matching required combinations.
-        """
-        return self.server_data.iloc[process_id]['Execution Time (seconds)']
+        return computation_delay_regressor.predict_rows(row_num=process_id)
     
     def get_delays(self, server_index, request: user.Request):
         """
