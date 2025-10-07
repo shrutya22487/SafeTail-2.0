@@ -1,9 +1,9 @@
 no_of_sensors = 1
-max_bandwidth = 200
+max_bandwidth = 20
 median_computation_delay = 0.048
 no_of_episodes = 10000     
 len_of_episode = 50
-max_load = 10 # make it 20
+max_load = 5# make it 20
 beta = 4
 alpha = 0.005
 # learning_rate =  0.0001
