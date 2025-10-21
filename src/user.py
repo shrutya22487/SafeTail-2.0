@@ -1,11 +1,6 @@
 
-"""
-user.py
 
-Provides Request and Users classes and a small __main__ that prints first requests for verification.
-
-"""
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any, Optional
 import sys
 import re
 import logging
@@ -27,7 +22,7 @@ class Request:
         process_id: int,
         message_size: float = 0.0,
         bandwidth: float = 0.0,
-        load: Optional[List[int]] = None,
+        load: Optional[np.ndarray] = None,
         ram_usage: float = 0.0,
         cpu_usage: Any = None,
         arrival_time: float = 0.0,
@@ -38,39 +33,54 @@ class Request:
         gpu_model: Optional[str] = None,
         cpu_clock: Optional[float] = None,
         gpu_clock: Optional[float] = None,
-        time_util: Optional[List[float]] = None,
+        time_util: Optional[np.ndarray] = None,
     ):
-        # actual important members
         self.request_id = int(request_id)
         self.process_id = int(process_id)
         self.message_size = float(message_size)
         self.bandwidth = float(bandwidth)
-        self.load = list(load) if load is not None else []
+
+        # ensure load is np.ndarray
+        if load is None:
+            self.load = np.array([], dtype=int)
+        else:
+            self.load = np.array(load, dtype=int)
+
         self.ram_usage = float(ram_usage)
         self.cpu_usage = cpu_usage
         self.arrival_time = float(arrival_time)
         self.duration = float(duration)
-        self.extras = dict(extras) if extras is not None else {}
 
-        # additional members
+        # extras remain dict, but lists inside are converted to np.ndarray
+        self.extras = {}
+        if extras is not None:
+            for k, v in extras.items():
+                if isinstance(v, list):
+                    self.extras[k] = np.array(v)
+                else:
+                    self.extras[k] = v
+
         self.gpu_usage = int(gpu_usage) if gpu_usage is not None and str(gpu_usage) != "" else None
         self.cpu_model = cpu_model
         self.gpu_model = gpu_model
         self.cpu_clock = float(cpu_clock) if cpu_clock is not None and str(cpu_clock) != "" else None
         self.gpu_clock = float(gpu_clock) if gpu_clock is not None and str(gpu_clock) != "" else None
-        self.time_util = list(time_util) if time_util is not None else []
 
-    #this is to create old state list keeping it now will change
+        # ensure time_util is np.ndarray
+        if time_util is None:
+            self.time_util = np.array([], dtype=float)
+        else:
+            self.time_util = np.array(time_util, dtype=float)
+
     def to_state(self) -> Dict[str, Any]:
-        load_arr = np.array(self.load if self.load else [], dtype=int)
         return {
-            "LOAD": load_arr,
+            "LOAD": np.array(self.load, dtype=int),
             "MESSAGE_SIZE": float(self.message_size),
             "BANDWIDTH": float(self.bandwidth),
         }
 
-    #added for easy print of request object
     def as_dict(self) -> Dict[str, Any]:
+        # Keep NumPy arrays as-is (no conversion)
         d = {
             "request_id": self.request_id,
             "process_id": self.process_id,
@@ -94,15 +104,13 @@ class Request:
     def __repr__(self) -> str:
         return (
             f"<Request id={self.request_id} pid={self.process_id} msg={self.message_size}B "
-            f"load_len={len(self.load)} ram={self.ram_usage} cpu={self.cpu_usage}>"
+            f"load_len={self.load.size} ram={self.ram_usage} cpu={self.cpu_usage}>"
         )
 
 
 class Users:
-    
-    
-    DEFAULT_DETECT_CSV =  './data/updated_Detect.csv'
-    DEFAULT_SERVER_STATE_CSV =  './data/server_state.csv'
+    DEFAULT_DETECT_CSV = '../data/updated_Detect.csv'
+    DEFAULT_SERVER_STATE_CSV = '../data/server_state.csv'
 
     def __init__(
         self,
@@ -111,8 +119,8 @@ class Users:
         server_state_csv: Optional[str] = None,
     ):
         self.number_of_requests = int(number_of_requests)
-        self.detect_csv = Path(detect_csv) if detect_csv else self.DEFAULT_DETECT_CSV
-        self.server_state_csv = Path(server_state_csv) if server_state_csv else self.DEFAULT_SERVER_STATE_CSV
+        self.detect_csv = Path(detect_csv) if detect_csv else Path(self.DEFAULT_DETECT_CSV)
+        self.server_state_csv = Path(server_state_csv) if server_state_csv else Path(self.DEFAULT_SERVER_STATE_CSV)
 
         if not self.detect_csv.exists():
             raise FileNotFoundError(f"Detect CSV not found: {self.detect_csv}")
@@ -130,12 +138,11 @@ class Users:
             )
             self.number_of_requests = available
 
-        self.requests: List[Request] = []
+        self.requests = []
         self._cursor = 0
         self._build_requests()
 
-    #added two functions purely for cleaning and parsing the data 
-    # -------------------------
+    # -------- helper parsing ----------
     @staticmethod
     def _parse_message_size(raw: Any) -> float:
         if raw is None or (isinstance(raw, float) and pd.isna(raw)):
@@ -144,22 +151,18 @@ class Users:
             return float(raw)
         except Exception:
             s = str(raw).strip()
-            
-            m = re.search(r"(\d+)\s*[xX]\s*(\d+)", s) #this checks for format {number:width} x or X {number:height} and stores them separately
+            m = re.search(r"(\d+)\s*[xX]\s*(\d+)", s)
             if m:
-                w = int(m.group(1)) 
+                w = int(m.group(1))
                 h = int(m.group(2))
                 return float(w * h * 3)
-            
-            
-            m2 = re.search(r"(\d+)", s) #this for case when we have straight width*height in csv
+            m2 = re.search(r"(\d+)", s)
             if m2:
                 return float(int(m2.group(1)))
         return 0.0
-    
-    #added two functions purely for cleaning and parsing the data 
+
     @staticmethod
-    def _server_row_to_list(server_row: Dict[str, Any]) -> List[int]:
+    def _server_row_to_list(server_row: Dict[str, Any]) -> np.ndarray:
         kv = []
         for k, v in server_row.items():
             if str(k).strip().lower() == "timestamp":
@@ -177,10 +180,9 @@ class Users:
                     res.append(int(float(v)))
                 except Exception:
                     res.append(0)
-        return res
+        return np.array(res, dtype=int)
 
-
-    #actual request builder
+    # -------- build requests ----------
     def _build_requests(self) -> None:
         for i in range(self.number_of_requests):
             det_row = self.detect_df.iloc[i]
@@ -189,47 +191,33 @@ class Users:
             request_id = int(i)
             process_id = int(i)
 
-            # message size
             message_size = 0.0
             if "Image Pixel" in det_row.index:
                 message_size = self._parse_message_size(det_row["Image Pixel"])
             elif "Image Pix" in det_row.index:
                 message_size = self._parse_message_size(det_row["Image Pix"])
 
-            # bandwidth from constants
             bandwidth = float(getattr(constants, "max_bandwidth", 200))
+            load_array = self._server_row_to_list(ss_row.to_dict())
 
-            # load list
-            server_state_list = self._server_row_to_list(ss_row.to_dict())
-            load_list = list(server_state_list)
-
-            # ram usage
             ram_usage = 0.0
             if "RAM Memory Usage (MB)" in det_row.index:
                 try:
                     ram_usage = float(det_row["RAM Memory Usage (MB)"])
                 except Exception:
-                    ram_usage = 0.0
+                    pass
 
-            # cpu usage
-            cpu_usage_val = None
-            if "CPU Usage Per Core" in det_row.index:
-                cpu_usage_val = det_row["CPU Usage Per Core"]
+            cpu_usage_val = det_row.get("CPU Usage Per Core", None)
 
-            # duration
             duration = 0.0
-            if "Execution Time (seconds)" in det_row.index:
-                try:
-                    duration = float(det_row["Execution Time (seconds)"])
-                except Exception:
-                    duration = 0.0
-            elif "Duration" in det_row.index:
-                try:
-                    duration = float(det_row["Duration"])
-                except Exception:
-                    duration = 0.0
+            for key in ("Execution Time (seconds)", "Duration"):
+                if key in det_row.index:
+                    try:
+                        duration = float(det_row[key])
+                        break
+                    except Exception:
+                        pass
 
-            # arrival_time
             arrival_time = 0.0
             for c in ("Iteration", "Image No", "Timestamp"):
                 if c in det_row.index and not pd.isna(det_row[c]):
@@ -239,7 +227,6 @@ class Users:
                     except Exception:
                         pass
 
-            # gpu usage
             gpu_usage_val = None
             if "GPU Usage (%)" in det_row.index:
                 try:
@@ -248,37 +235,34 @@ class Users:
                     try:
                         gpu_usage_val = int(float(det_row["GPU Usage (%)"]))
                     except Exception:
-                        gpu_usage_val = None
+                        pass
 
-            # cpu/gpu models & clocks
-            cpu_model = det_row["CPU Model"] if "CPU Model" in det_row.index else None
-            gpu_model = det_row["GPU Model"] if "GPU Model" in det_row.index else None
+            cpu_model = det_row.get("CPU Model", None)
+            gpu_model = det_row.get("GPU Model", None)
 
             cpu_clock_val = None
             if "CPU Clock Speed (MHz)" in det_row.index:
                 try:
                     cpu_clock_val = float(det_row["CPU Clock Speed (MHz)"])
                 except Exception:
-                    cpu_clock_val = None
+                    pass
 
             gpu_clock_val = None
             if "GPU Clock Speed (MHz)" in det_row.index:
                 try:
                     gpu_clock_val = float(det_row["GPU Clock Speed (MHz)"])
                 except Exception:
-                    gpu_clock_val = None
+                    pass
 
-            # time_util
             proc_t = 0.0
             if "Processing Time" in det_row.index:
                 try:
                     proc_t = float(det_row["Processing Time"])
                 except Exception:
-                    proc_t = 0.0
+                    pass
             exec_t = duration
-            time_util = [proc_t, exec_t]
+            time_util = np.array([proc_t, exec_t], dtype=float)
 
-            # extras
             extras = {}
             skip_keys = {
                 "Image Pixel", "Image Pix", "RAM Memory Usage (MB)", "CPU Usage Per Core",
@@ -288,14 +272,17 @@ class Users:
             }
             for k, v in det_row.to_dict().items():
                 if k not in skip_keys:
-                    extras[k] = v
+                    if isinstance(v, list):
+                        extras[k] = np.array(v)
+                    else:
+                        extras[k] = v
 
             req = Request(
                 request_id=request_id,
                 process_id=process_id,
                 message_size=message_size,
                 bandwidth=bandwidth,
-                load=load_list,
+                load=load_array,
                 ram_usage=ram_usage,
                 cpu_usage=cpu_usage_val,
                 arrival_time=arrival_time,
@@ -311,10 +298,10 @@ class Users:
 
             self.requests.append(req)
 
-        logger.info("Built %d Request objects (rows 0..%d).", len(self.requests), max(0, self.number_of_requests - 1))
+        logger.info("Built %d Request objects (rows 0..%d).",
+                    len(self.requests), max(0, self.number_of_requests - 1))
 
-    # -------------------------
-    def next_request(self) -> Optional[Request]: #this to enumerate through request list
+    def next_request(self) -> Optional[Request]:
         if self._cursor >= len(self.requests):
             return None
         r = self.requests[self._cursor]
@@ -324,15 +311,14 @@ class Users:
     def reset(self) -> None:
         self._cursor = 0
 
-    def get_state_for_request(self, request: Request) -> Dict[str, Any]: #this to get state from user object
-        load_arr = np.array(request.load if request.load else [], dtype=int)
+    def get_state_for_request(self, request: Request) -> Dict[str, Any]:
         return {
-            "LOAD": load_arr,
+            "LOAD": np.array(request.load, dtype=int),
             "MESSAGE_SIZE": float(request.message_size),
             "BANDWIDTH": float(request.bandwidth),
         }
 
-    def __len__(self) -> int: 
+    def __len__(self) -> int:
         return len(self.requests)
 
 # main is kept for debugging 
