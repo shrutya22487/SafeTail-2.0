@@ -12,6 +12,8 @@ from types import SimpleNamespace
 from receiver import Receiver
 from sender_bursts import SenderBursts
 import user
+import servers
+from controller import Controller
 
 # --- request factory that uses the actual Request signature ---
 def request_factory(i: int):
@@ -51,8 +53,12 @@ def request_factory(i: int):
 
 
 def main():
+    # --------------- setup controller ---------------
+    users  = user.Users(number_of_requests=10)
+    controller = Controller()
+    
     # ---------------- start receiver ----------------
-    receiver = Receiver(persist_chunks=True, process_time_per_chunk=0.2)
+    receiver = Receiver(persist_chunks=True, process_time_per_chunk=0.2, controller=controller)
     receiver.run_async()
     print("[MAIN] Receiver started in background thread.")
     time.sleep(1.0)  # let it bind

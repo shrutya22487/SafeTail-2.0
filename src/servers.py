@@ -4,14 +4,26 @@ import pickle
 import pandas as pd
 import time
 import user
+from pathlib import Path
 import computation_delay_regressor
 
 TIME_SCALE = 10.0  # factor to speed up time in simulation
 class Server:
     def __init__(self, server_index):
+        base_dir = Path(__file__).resolve().parent  # points to src/
+        pkl_path = base_dir.parent / "data" / "propagation_delays.pkl"
+        if not pkl_path.exists():
+            raise FileNotFoundError(f"Propagation delays file not found: {pkl_path}")
+        with open(pkl_path, 'rb') as f:
+            self.propagation_delays = pickle.load(f)
+        
+        csv_path = base_dir.parent / "data" / "server_data.csv"
+        if not csv_path.exists():
+            raise FileNotFoundError(f"Server data file not found: {csv_path}")
+
+        self.server_data = pd.read_csv(csv_path)
+        
         self.server_index = server_index
-        self.propagation_delays = pickle.load(open('../data/propagation_delays.pkl', 'rb')) 
-        self.server_data = pd.read_csv('../data/server_data.csv')
         self.num_requests = 0
         self.requests = []
         # internal tracking of visible active requests with times:

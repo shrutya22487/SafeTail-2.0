@@ -1,5 +1,5 @@
 from typing import Dict, Any, Optional
-import sys
+
 import re
 import logging
 from pathlib import Path
@@ -95,22 +95,24 @@ class Request:
 
 class Users:
     DEFAULT_DETECT_CSV = '../data/updated_Detect.csv'
-    DEFAULT_SERVER_STATE_CSV = '../data/server_state.csv'
+    # DEFAULT_SERVER_STATE_CSV = '../data/server_state.csv'
 
     def __init__(self, number_of_requests: int, detect_csv: Optional[str] = None, server_state_csv: Optional[str] = None):
         self.number_of_requests = int(number_of_requests)
-        self.detect_csv = Path(detect_csv or self.DEFAULT_DETECT_CSV)
-        self.server_state_csv = Path(server_state_csv or self.DEFAULT_SERVER_STATE_CSV)
+        base_dir = Path(__file__).resolve().parent  # This points to src/
+        self.detect_csv = base_dir.parent / "data" / "updated_Detect.csv"
+        # self.server_state_csv = Path(server_state_csv or self.DEFAULT_SERVER_STATE_CSV)
 
         if not self.detect_csv.exists():
             raise FileNotFoundError(f"Detect CSV not found: {self.detect_csv}")
-        if not self.server_state_csv.exists():
-            raise FileNotFoundError(f"Server state CSV not found: {self.server_state_csv}")
+        # if not self.server_state_csv.exists():
+        #     raise FileNotFoundError(f"Server state CSV not found: {self.server_state_csv}")
 
         self.detect_df = pd.read_csv(self.detect_csv)
-        self.server_state_df = pd.read_csv(self.server_state_csv)
+        # self.server_state_df = pd.read_csv(self.server_state_csv)
 
-        available = min(len(self.detect_df), len(self.server_state_df))
+        # available = min(len(self.detect_df), len(self.server_state_df))
+        available = len(self.detect_df)
         if self.number_of_requests > available:
             logger.warning(
                 "Requested %d requests but only %d rows available; capping to %d.",
@@ -157,7 +159,7 @@ class Users:
     def _build_requests(self) -> None:
         for i in range(self.number_of_requests):
             det_row = self.detect_df.iloc[i]
-            ss_row = self.server_state_df.iloc[i]
+            # ss_row = self.server_state_df.iloc[i]
 
             message_size = 0.0
             for key in ("Image Pixel", "Image Pix"):
@@ -165,7 +167,7 @@ class Users:
                     message_size = self._parse_message_size(det_row[key])
                     break
 
-            load_array = self._server_row_to_array(ss_row.to_dict())
+            # load_array = self._server_row_to_array(ss_row.to_dict())
             ram_usage = float(det_row.get("RAM Memory Usage (MB)", 0.0))
             cpu_usage = det_row.get("CPU Usage Per Core", None)
             duration = float(det_row.get("Execution Time (seconds)", det_row.get("Duration", 0.0)))
@@ -197,7 +199,7 @@ class Users:
                 process_id=i,
                 message_size=message_size,
                 bandwidth=float(getattr(constants, "max_bandwidth", 200)),
-                load=load_array,
+                # load=load_array,
                 ram_usage=ram_usage,
                 cpu_usage=cpu_usage,
                 arrival_time=arrival_time,

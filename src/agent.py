@@ -52,7 +52,7 @@ def get_state_input(state):
 class DQNAgent:
     def __init__(self, states, actions, alpha, reward_gamma, epsilon,
                  epsilon_min, epsilon_decay, batch_size, beta,
-                 median_computation_delay, learning_rate, task, epochs, request : user.Request, server_list: List[servers.Server]
+                 median_computation_delay, learning_rate, task, epochs, request : user.Request, server_list: list[servers.Server]
                 ,encoder_output_dim=32):
         self.nS = states
         self.nA = actions
