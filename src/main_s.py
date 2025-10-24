@@ -54,14 +54,12 @@ def request_factory(i: int):
 
 def main():
     # --------------- setup controller ---------------
-    users  = user.Users(number_of_requests=10)
-    controller = Controller()
-    
-    # ---------------- start receiver ----------------
+    controller = Controller()  
+    # ---------------- setup receiver ----------------
     receiver = Receiver(persist_chunks=True, process_time_per_chunk=0.2, controller=controller)
-    receiver.run_async()
-    print("[MAIN] Receiver started in background thread.")
-    time.sleep(1.0)  # let it bind
+    
+    controller.run()
+
 
     # ---------------- create sender ----------------
     sender = SenderBursts(
