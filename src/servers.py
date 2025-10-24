@@ -26,7 +26,7 @@ class Server:
         return self.num_requests < 4
 
     def _get_propogation_delay(self):
-        return random.choice(self.propagation_delays[self.server_index])
+        return random.choice(self.propagation_delays[self.server_index - 1])
     
     def _get_tramission_delay(self, message_size, upload_bandwidth, download_bandwidth):
         message_size = 8 * message_size
