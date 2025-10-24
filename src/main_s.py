@@ -9,8 +9,8 @@ This request_factory constructs user.Request objects using the correct signature
 import time
 from types import SimpleNamespace
 
-from Receiver import Receiver
-from SenderBursts import SenderBursts
+from receiver import Receiver
+from sender_bursts import SenderBursts
 import user
 
 # --- request factory that uses the actual Request signature ---
