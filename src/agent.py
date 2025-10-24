@@ -29,7 +29,6 @@ def get_subsets(fullset):
         subsets.append(subset)
     return subsets[1:]
 
-
 def get_state_input(state):
     """
     Flatten the state dict into a list of values.
@@ -52,7 +51,7 @@ def get_state_input(state):
 class DQNAgent:
     def __init__(self, states, actions, alpha, reward_gamma, epsilon,
                  epsilon_min, epsilon_decay, batch_size, beta,
-                 median_computation_delay, learning_rate, task, epochs, request : user.Request
+                 median_computation_delay, learning_rate, task, epochs, request : user.Request, server_list: List[servers.Server]
                 ,encoder_output_dim=32):
         self.nS = states
         self.nA = actions
@@ -88,6 +87,7 @@ class DQNAgent:
         self.load_arr = []
 
         self.request = request
+        self.server_list = server_list
 
     def build_model(self, encoded_dim):
         model = keras.Sequential() 
@@ -156,10 +156,8 @@ class DQNAgent:
         """
         min_delay = float('inf')
         
-        servers_obj = servers.Servers()
-
         for server in servers_to_be_queried:
-            min_delay = min(min_delay, servers_obj.get_delays(state, server, self.request))
+            min_delay = min(min_delay, self.server_list[server].get_delays(state, server, self.request))
         return min_delay
     
     def process_request(self, request: user.Request):

@@ -11,7 +11,7 @@ import constants
 from typing import List
 
 class Controller:
-    def __init__(self, requests : List[user.Request], input_dim=10, output_dim=5):
+    def __init__(self, requests : List[user.Request], server_list: List[servers.Server], input_dim=10, output_dim=5, ):
 
         self.requests = requests
         self.agent = agent.DQNAgent(
@@ -28,8 +28,10 @@ class Controller:
             learning_rate=constants.learning_rate,
             task=None,
             epochs=constants.no_of_episodes,
+            server_list = server_list,
             request=None  # will be set per request
         )    
+        self.server_list = server_list
         
     def run(self):
         """
