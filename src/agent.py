@@ -9,7 +9,6 @@ from keras.optimizers import Adam
 from encoder import Encoder
 import servers
 import user
-from typing import List
 
 def get_subsets(fullset):
     """Helper: return all non-empty subsets of a set"""
