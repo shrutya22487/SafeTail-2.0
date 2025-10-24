@@ -10,6 +10,10 @@ Usage:
                           [--min-interval s] [--max-interval s] [--jitter s]
 
 Example:
+
+python3 request_generator.py --total 120 --chunk 10 --bursts 12 --min-burst 5 --max-burst 8 --min-interval 0.1 --max-interval 0.6 --jitter 0.01
+
+Example:
   # total 100 requests, chunk_size=10 => 10 chunks. 8 bursts random (each burst size 1..4)
   python3 sender_bursts.py --total 100 --chunk 10 --bursts 8 --min-burst 1 --max-burst 4
 
@@ -139,3 +143,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
