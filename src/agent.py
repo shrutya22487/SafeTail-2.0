@@ -25,12 +25,13 @@ def get_subsets(fullset):
         for k in range(len(listrep)):
             if i & 1 << k:
                 subset.append(listrep[k])
-        subsets.append(subset)
-    return subsets[1:]
+        subsets.append(np.array(subset))  # convert each subset to np.array
+    return np.array(subsets[1:], dtype=object)  # return numpy array of subsets
+
 
 def get_state_input(state):
     """
-    Flatten the state dict into a list of values.
+    Flatten the state dict into a NumPy array of values.
     Used before encoding.
     """
     output = []
@@ -45,7 +46,8 @@ def get_state_input(state):
     if "PROPOGATION" in state.keys():
         for i in state['PROPOGATION']:
             output.append(i)
-    return output
+    return np.array(output, dtype=float)
+
 
 class DQNAgent:
     def __init__(self, states, actions, alpha, reward_gamma, epsilon,
@@ -73,17 +75,17 @@ class DQNAgent:
         # RL model: same as before
         self.model = self.build_model(encoder_output_dim)
 
-        # Stats
-        self.loss = []
-        self.val_loss = []
-        self.exploit_or_explore = []
-        self.epsilon_curve = []
-        self.episode_access_rate = []
-        self.latencies = []
-        self.deviations = []
-        self.rewards = []
-        self.action = []
-        self.load_arr = []
+        # Stats (initialized as empty numpy arrays)
+        self.loss = np.array([])
+        self.val_loss = np.array([])
+        self.exploit_or_explore = np.array([], dtype='<U8')  # strings like "explore"/"exploit"
+        self.epsilon_curve = np.array([])
+        self.episode_access_rate = np.array([])
+        self.latencies = np.array([])
+        self.deviations = np.array([])
+        self.rewards = np.array([])
+        self.action = np.array([], dtype=object)
+        self.load_arr = np.array([])
 
         self.request = request
         self.server_list = server_list
@@ -102,21 +104,21 @@ class DQNAgent:
     
     def store(self, state, action, reward , next_state):
         # Encode before storing
-        encoded_state = self.encoder(np.array(get_state_input(state)).reshape(1, -1))
-        encoded_next_state = self.encoder(np.array(get_state_input(next_state)).reshape(1, -1))
+        encoded_state = self.encoder(get_state_input(state).reshape(1, -1))
+        encoded_next_state = self.encoder(get_state_input(next_state).reshape(1, -1))
         self.memory.append((encoded_state, action, reward, encoded_next_state))
     
     def get_action(self,state):
         no_of_edges = self.beta
         subsets = get_subsets(set([x for x in range(self.beta)]))
-        state_flattened = np.array(get_state_input(state)).reshape(1, self.nS)
+        state_flattened = get_state_input(state).reshape(1, self.nS)
         encoded_state = self.encoder(state_flattened).numpy()
 
         if np.random.rand() <= self.epsilon:
-            self.exploit_or_explore.append("explore")
+            self.exploit_or_explore = np.append(self.exploit_or_explore, "explore")
             action = np.random.randint(0, self.nA)
         else:
-            self.exploit_or_explore.append("exploit")
+            self.exploit_or_explore = np.append(self.exploit_or_explore, "exploit")
             start_time = time.time()
             action_vals = self.model.predict(encoded_state , verbose=0)
             end_time = time.time()
@@ -125,8 +127,8 @@ class DQNAgent:
 
         return_arr = subsets[action]
    
-        self.episode_access_rate.append(float(len(return_arr))/no_of_edges)
-        self.action.append(subsets[action])
+        self.episode_access_rate = np.append(self.episode_access_rate, float(len(return_arr))/no_of_edges)
+        self.action = np.append(self.action, [subsets[action]])
         return return_arr , action 
 
     def experience_replay(self, batch_size):
@@ -146,8 +148,8 @@ class DQNAgent:
         if self.epsilon > self.epsilon_min:
             self.epsilon -= self.epsilon_decay
 
-        self.loss.append(hist.history['loss'][0])
-        self.val_loss.append(hist.history['val_loss'][0])
+        self.loss = np.append(self.loss, hist.history['loss'][0])
+        self.val_loss = np.append(self.val_loss, hist.history['val_loss'][0])
         
     def get_min_delay(self, state, servers_to_be_queried):
         """
@@ -171,7 +173,6 @@ class DQNAgent:
         self.store(state, action_index, reward, next_state)
 
 
-    # TODO (@medhakashyap): Modify reward function as needed
     def reward(self, action, state):
         """
         Used to compute min latency among chosen servers.
@@ -202,9 +203,9 @@ class DQNAgent:
             elif lamda < 0:
                 reward = (-1 * np.exp(gamma) * delta)
 
-            self.latencies.append(obs_latency)
-            self.deviations.append(abs(obs_latency - MEDIAN_LATENCY))
-            self.rewards.append(reward)    
+            self.latencies = np.append(self.latencies, obs_latency)
+            self.deviations = np.append(self.deviations, abs(obs_latency - MEDIAN_LATENCY))
+            self.rewards = np.append(self.rewards, reward)    
 
             if len(self.memory) > self.batch_size:
                 self.experience_replay(self.batch_size)
