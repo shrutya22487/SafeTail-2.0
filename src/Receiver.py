@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+import socket
+import struct
+import io
+import time
+import threading
+import numpy as np
+from pathlib import Path
+from collections import deque
+from typing import Optional
+
+import user
+
+OUT_DIR = Path("received_chunks")
+OUT_DIR.mkdir(exist_ok=True)
+
+class Receiver:
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 6000,
+        tcp_backlog: int = 200,
+        max_queue: int = 20,
+        accept_window_sec: float = 0.15,
+        process_time_per_chunk: float = 0.20,
+        persist_chunks: bool = True,
+    ):
+        self.host = host
+        self.port = port
+        self.tcp_backlog = tcp_backlog
+        self.MAX_QUEUE = max_queue
+        self.ACCEPT_WINDOW_SEC = accept_window_sec
+        self.PROCESS_TIME_PER_CHUNK = process_time_per_chunk
+        self.PERSIST_CHUNKS = persist_chunks
+
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def _recv_all(self, conn, n: int) -> Optional[bytes]:
+        data = b""
+        while len(data) < n:
+            packet = conn.recv(n - len(data))
+            if not packet:
+                return None
+            data += packet
+        return data
+
+    def _visualize_queue(self, queue_len: int):
+        maxq = max(1, self.MAX_QUEUE)
+        filled = int((queue_len / maxq) * 20)
+        empty = 20 - filled
+        bar = "#" * filled + "-" * empty
+        print(f"[QUEUE] [{bar}] ({queue_len}/{self.MAX_QUEUE})")
+
+    def _extract_request_id(self, req):
+        # try direct attr names
+        for name in ("request_id", "requestId", "req_id", "rid", "id", "_id", "process_id"):
+            try:
+                if hasattr(req, name):
+                    v = getattr(req, name)
+                    if callable(v):
+                        try:
+                            return v()
+                        except Exception:
+                            continue
+                    return v
+            except Exception:
+                pass
+        # try __dict__
+        try:
+            d = getattr(req, "__dict__", None)
+            if isinstance(d, dict):
+                for k in ("request_id", "id", "process_id"):
+                    if k in d:
+                        return d[k]
+                for k, v in d.items():
+                    if isinstance(v, (int, str)):
+                        return v
+        except Exception:
+            pass
+        # try common getters
+        for method in ("get_request_id", "getRequestId", "get_id", "getId", "id"):
+            try:
+                if hasattr(req, method) and callable(getattr(req, method)):
+                    try:
+                        return getattr(req, method)()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        # try to_dict/as_dict
+        for method in ("as_dict", "to_dict", "toJSON", "to_json"):
+            try:
+                if hasattr(req, method) and callable(getattr(req, method)):
+                    try:
+                        d = getattr(req, method)()
+                        if isinstance(d, dict):
+                            for k in ("request_id", "id", "process_id"):
+                                if k in d:
+                                    return d[k]
+                            for v in d.values():
+                                if isinstance(v, (int, str)):
+                                    return v
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        # dir scan for id-like attribute
+        try:
+            for attr in dir(req):
+                if attr.startswith("_"):
+                    continue
+                if "id" in attr.lower() or "req" in attr.lower() or "pid" in attr.lower():
+                    try:
+                        v = getattr(req, attr)
+                        if isinstance(v, (int, str)):
+                            return v
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return None
+
+    def _process_connection(self, conn, addr, simulate_processing=True):
+        try:
+            with conn:
+                while True:
+                    header = self._recv_all(conn, 8)
+                    if not header:
+                        break
+                    length = struct.unpack(">Q", header)[0]
+                    payload = self._recv_all(conn, length)
+                    if payload is None:
+                        break
+
+                    f = io.BytesIO(payload)
+                    try:
+                        arr = np.load(f, allow_pickle=True)
+                    except Exception as e:
+                        print(f"[!] np.load failed from {addr}: {e}")
+                        break
+
+                    if not isinstance(arr, np.ndarray) or arr.dtype != object:
+                        try:
+                            arr = np.array(arr, dtype=object)
+                        except Exception:
+                            print(f"[!] Failed to coerce payload from {addr}; skipping.")
+                            continue
+
+                    # debug print (type + short repr) and extract ids
+                    ids = []
+                    for idx, req in enumerate(arr):
+                        try:
+                            t = type(req)
+                            mod = t.__module__
+                            name = t.__name__
+                            try:
+                                r = repr(req)
+                                if len(r) > 200:
+                                    r = r[:200] + "..."
+                            except Exception:
+                                r = "<repr-failed>"
+                            print(f"    [DBG] item[{idx}]: type={mod}.{name}, repr={r}")
+                        except Exception:
+                            print(f"    [DBG] item[{idx}]: type={type(req)}")
+
+                        ids.append(self._extract_request_id(req))
+
+                    print(f"[>] Received chunk from {addr}: len={len(arr)}, ids={ids}")
+
+                    if self.PERSIST_CHUNKS:
+                        ts = int(time.time() * 1000)
+                        filename = OUT_DIR / f"chunk_{addr[0].replace('.', '_')}_{addr[1]}_{ts}.npy"
+                        try:
+                            np.save(filename, arr, allow_pickle=True)
+                            print(f"[✓] Saved chunk -> {filename}")
+                        except Exception as e:
+                            print(f"[!] Failed to save chunk: {e}")
+
+                    if simulate_processing and self.PROCESS_TIME_PER_CHUNK > 0:
+                        time.sleep(self.PROCESS_TIME_PER_CHUNK)
+
+                    try:
+                        conn.sendall(b"\x01")
+                    except Exception:
+                        pass
+
+        except Exception as e:
+            print(f"[!] Exception while processing {addr}: {e}")
+        finally:
+            print(f"[-] Finished processing {addr}")
+
+    def run(self):
+        pending = deque()
+        print(f"[SERVER] Listening on {self.host}:{self.port} (tcp_backlog={self.tcp_backlog})")
+        print(f"[CONFIG] MAX_QUEUE={self.MAX_QUEUE}, ACCEPT_WINDOW_SEC={self.ACCEPT_WINDOW_SEC}, PROCESS_TIME_PER_CHUNK={self.PROCESS_TIME_PER_CHUNK}\n")
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((self.host, self.port))
+            s.listen(self.tcp_backlog)
+            s.settimeout(0.5)
+
+            try:
+                while not self._stop_event.is_set():
+                    accept_deadline = time.time() + self.ACCEPT_WINDOW_SEC
+                    while time.time() < accept_deadline and len(pending) < self.MAX_QUEUE and not self._stop_event.is_set():
+                        try:
+                            remain = accept_deadline - time.time()
+                            s.settimeout(remain if remain > 0.01 else 0.01)
+                            conn, addr = s.accept()
+                            pending.append((conn, addr))
+                            print(f"[+] Accepted and queued {addr} (pending={len(pending)})")
+                        except socket.timeout:
+                            continue
+                        except Exception as e:
+                            print(f"[!] Accept error: {e}")
+                            continue
+
+                    self._visualize_queue(len(pending))
+
+                    if pending:
+                        conn, addr = pending.popleft()
+                        self._visualize_queue(len(pending))
+                        print(f"[>] Processing {addr}")
+                        self._process_connection(conn, addr, simulate_processing=True)
+
+                    if not pending and not self._stop_event.is_set():
+                        try:
+                            s.settimeout(None)
+                            conn, addr = s.accept()
+                            if len(pending) < self.MAX_QUEUE:
+                                pending.append((conn, addr))
+                                print(f"[+] Accepted and queued {addr} (pending={len(pending)})")
+                                self._visualize_queue(len(pending))
+                            else:
+                                try:
+                                    conn.sendall(b"BUSY")
+                                except Exception:
+                                    pass
+                                conn.close()
+                        except KeyboardInterrupt:
+                            raise
+                        except Exception as e:
+                            print(f"[!] Accept error while idle: {e}")
+                            continue
+
+            except KeyboardInterrupt:
+                print("\n[SERVER] Shutting down (KeyboardInterrupt).")
+            finally:
+                print("[SERVER] Closing remaining pending connections.")
+                while pending:
+                    conn, _ = pending.popleft()
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+
+    def run_async(self):
+        if self._thread and self._thread.is_alive():
+            raise RuntimeError("Receiver already running")
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self.run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop_event.set()
+        print("[SERVER] Stop requested.")
