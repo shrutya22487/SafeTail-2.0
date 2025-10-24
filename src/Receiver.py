@@ -9,8 +9,6 @@ from pathlib import Path
 from collections import deque
 from typing import Optional
 
-import user
-
 OUT_DIR = Path("received_chunks")
 OUT_DIR.mkdir(exist_ok=True)
 
@@ -24,6 +22,7 @@ class Receiver:
         accept_window_sec: float = 0.15,
         process_time_per_chunk: float = 0.20,
         persist_chunks: bool = True,
+        controller = None,
     ):
         self.host = host
         self.port = port
@@ -32,6 +31,10 @@ class Receiver:
         self.ACCEPT_WINDOW_SEC = accept_window_sec
         self.PROCESS_TIME_PER_CHUNK = process_time_per_chunk
         self.PERSIST_CHUNKS = persist_chunks
+        
+        self.controller = controller  #backlink to controller
+        if controller is not None:
+            controller.receiver_queue = self    # mutual link
 
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -133,6 +136,7 @@ class Receiver:
                     if payload is None:
                         break
 
+                    # deserialize numpy array
                     f = io.BytesIO(payload)
                     try:
                         arr = np.load(f, allow_pickle=True)
@@ -147,7 +151,7 @@ class Receiver:
                             print(f"[!] Failed to coerce payload from {addr}; skipping.")
                             continue
 
-                    # debug print (type + short repr) and extract ids
+                    # summary and debug print (type + short repr) and extract ids
                     ids = []
                     for idx, req in enumerate(arr):
                         try:
@@ -168,6 +172,7 @@ class Receiver:
 
                     print(f"[>] Received chunk from {addr}: len={len(arr)}, ids={ids}")
 
+                    # persist chunk
                     if self.PERSIST_CHUNKS:
                         ts = int(time.time() * 1000)
                         filename = OUT_DIR / f"chunk_{addr[0].replace('.', '_')}_{addr[1]}_{ts}.npy"
@@ -176,9 +181,13 @@ class Receiver:
                             print(f"[✓] Saved chunk -> {filename}")
                         except Exception as e:
                             print(f"[!] Failed to save chunk: {e}")
-
-                    if simulate_processing and self.PROCESS_TIME_PER_CHUNK > 0:
-                        time.sleep(self.PROCESS_TIME_PER_CHUNK)
+                    
+                    # Pass directly to controller queue
+                    self.controller.send_to_server(arr)
+                    
+                    # OR Simluate processing time
+                    # if simulate_processing and self.PROCESS_TIME_PER_CHUNK > 0:
+                    #     time.sleep(self.PROCESS_TIME_PER_CHUNK)
 
                     try:
                         conn.sendall(b"\x01")
@@ -193,7 +202,7 @@ class Receiver:
     def run(self):
         pending = deque()
         print(f"[SERVER] Listening on {self.host}:{self.port} (tcp_backlog={self.tcp_backlog})")
-        print(f"[CONFIG] MAX_QUEUE={self.MAX_QUEUE}, ACCEPT_WINDOW_SEC={self.ACCEPT_WINDOW_SEC}, PROCESS_TIME_PER_CHUNK={self.PROCESS_TIME_PER_CHUNK}\n")
+        print(f"[CONFIG] MAX_QUEUE={self.MAX_QUEUE}, ACCEPT_WINDOW_SEC={self.ACCEPT_WINDOW_SEC}\n")
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

@@ -208,3 +208,6 @@ __marimo__/
 models/full_pipeline.pkl
 models/regressor_model.pkl
 .DS_Store
+
+# Folders
+received_chunks/
