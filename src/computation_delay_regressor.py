@@ -271,11 +271,11 @@ def preprocess_dataframe(df_raw):
 
 
 # --- Prediction pipeline ---
-def predict_rows(row_num=None, verbose=True):
+def predict_rows(server_index, row_num=None, verbose=True):
     
     model_path = "../models/regressor_model.pkl"
     pipeline_path = "../models/full_pipeline.pkl"
-    input_csv = "../data/updated_file_Detect.csv"
+    input_csv = f"../data/server{server_index}.csv"
     output_csv = "../data/predictions.csv"
     
     # load model & pipeline
@@ -290,8 +290,8 @@ def predict_rows(row_num=None, verbose=True):
         if row_num < 0 or row_num >= len(df_input):
             raise IndexError(f"Row number {row_num} is out of range (0–{len(df_input)-1})")
         df_input = df_input.iloc[[row_num]].copy()
-        if verbose:
-            print(f"Predicting only for row {row_num}")
+        # if verbose:
+            # print(f"Predicting only for row {row_num}")
     # ----------------
 
     df_features, latent_cols = preprocess_dataframe(df_input)
@@ -371,7 +371,7 @@ def predict_rows(row_num=None, verbose=True):
             pt = pipeline['power_transformer']
             y_pred_original = pt.inverse_transform(y_pred_transformed.reshape(-1, 1)).flatten()
         else:
-            print("Warning: Yeo-Johnson transformer not found; returning transformed predictions.")
+            # print("Warning: Yeo-Johnson transformer not found; returning transformed predictions.")
             y_pred_original = y_pred_transformed
     else:
         y_pred_original = y_pred_transformed
@@ -382,7 +382,7 @@ def predict_rows(row_num=None, verbose=True):
 
     if row_num is not None:
         pred = float(out_df.loc[0, 'predicted_processing_time'])
-        print(f"\nRow {row_num} -> Predicted Processing Time: {pred}")
+        print(f"\nRow {row_num + 2} -> Predicted Processing Time: {pred}")
         return pred
 
     # otherwise, print all and save CSV
