@@ -9,6 +9,7 @@ from keras.optimizers import Adam
 from encoder import Encoder
 import servers
 import user
+import traceback
 
 def get_subsets(fullset):
     """Helper: return all non-empty subsets of a set"""
@@ -29,24 +30,63 @@ def get_subsets(fullset):
     return np.array(subsets[1:], dtype=object)  # return numpy array of subsets
 
 
-def get_state_input(state):
+def request_to_state_array(request_obj):
     """
-    Flatten the state dict into a NumPy array of values.
-    Used before encoding.
+    Converts a Request object into a flattened numeric NumPy array.
+    Handles nested arrays, lists, dicts, and None values safely.
+    Skips invalid or non-numeric entries gracefully.
     """
-    output = []
-    for i in state['LOAD']:
-        output.append(i)
-    if "MESSAGE_SIZE" in state.keys():
-        output.append(state['MESSAGE_SIZE'])
-    if "RESOLUTION" in state.keys():
-        output.append(state['RESOLUTION'])
-    if "BANDWIDTH" in state.keys():
-        output.append(state['BANDWIDTH'])
-    if "PROPOGATION" in state.keys():
-        for i in state['PROPOGATION']:
-            output.append(i)
-    return np.array(output, dtype=float)
+    flat_values = []
+
+    for attr, value in vars(request_obj).items():
+        try:
+            # None → 0.0
+            if value is None:
+                flat_values.append(0.0)
+
+            # Scalars (int, float, numpy scalar)
+            elif isinstance(value, (int, float, np.integer, np.floating)):
+                flat_values.append(float(value))
+
+            # Lists, tuples, or numpy arrays
+            elif isinstance(value, (list, tuple, np.ndarray)):
+                try:
+                    arr = np.asarray(value, dtype=float).flatten()
+                    flat_values.extend(arr.tolist())
+                except Exception as e:
+                    print(f"[AGENT]    [WARN] Could not convert array-like attribute '{attr}' → {type(value)}: {e}")
+                    continue
+
+            # Dictionaries (flatten recursively)
+            elif isinstance(value, dict):
+                for k, v in value.items():
+                    try:
+                        if isinstance(v, (int, float, np.integer, np.floating)):
+                            flat_values.append(float(v))
+                        elif isinstance(v, (list, tuple, np.ndarray)):
+                            arr = np.asarray(v, dtype=float).flatten()
+                            flat_values.extend(arr.tolist())
+                    except Exception as e:
+                        print(f"[AGENT]    [WARN] Could not process dict key '{k}' in '{attr}': {e}")
+                        continue
+
+            # Ignore strings, models, and unsupported types
+            else:
+                continue
+
+        except Exception as e:
+            print(f"[AGENT]    [ERROR] Failed to process attribute '{attr}' ({type(value)}): {e}")
+            traceback.print_exc()
+            continue
+
+    # Final safety conversion
+    try:
+        return np.array(flat_values, dtype=float)
+    except Exception as e:
+        print(f"[AGENT]    [FATAL] Could not create NumPy array from collected values: {e}")
+        traceback.print_exc()
+        return np.zeros(1, dtype=float)  # fallback to a safe dummy vector
+
 
 
 class DQNAgent:
@@ -102,34 +142,64 @@ class DQNAgent:
                       optimizer=keras.optimizers.Adam(learning_rate=self.learning_rate)) 
         return model
     
-    def store(self, state, action, reward , next_state):
-        # Encode before storing
-        encoded_state = self.encoder(get_state_input(state).reshape(1, -1))
-        encoded_next_state = self.encoder(get_state_input(next_state).reshape(1, -1))
-        self.memory.append((encoded_state, action, reward, encoded_next_state))
-    
-    def get_action(self,state):
-        no_of_edges = self.beta
-        subsets = get_subsets(set([x for x in range(self.beta)]))
-        state_flattened = get_state_input(state).reshape(1, self.nS)
-        encoded_state = self.encoder(state_flattened).numpy()
+    def store(self, state_request, action, reward, next_state_request):
+        """
+        Store experience (state, action, reward, next_state) into replay memory.
+        Automatically converts Request objects into encoded vectors.
+        """
+        # Convert request objects → flattened numpy arrays
+        state_vec = request_to_state_array(state_request).reshape(1, -1)
+        next_state_vec = request_to_state_array(next_state_request).reshape(1, -1)
 
+        # Encode using the same encoder as before
+        encoded_state = self.encoder(state_vec)
+        encoded_next_state = self.encoder(next_state_vec)
+
+        # Append to replay memory
+        self.memory.append((encoded_state, action, reward, encoded_next_state))
+
+    
+    def get_action(self, request):
+        """
+        Selects an action (subset of servers) given the current Request.
+        Uses epsilon-greedy strategy.
+        """
+
+        # 1️⃣ Convert Request object → numeric state vector
+        state_flattened = request_to_state_array(request).reshape(1, -1)
+
+        # 2️⃣ Encode using your encoder (no .numpy())
+        encoded_state = self.encoder(state_flattened, training=False)
+
+        # 3️⃣ Build all possible non-empty subsets of servers (0-based indexing)
+        subsets = get_subsets(set(range(self.beta)))
+
+        # 4️⃣ Epsilon-greedy exploration
         if np.random.rand() <= self.epsilon:
             self.exploit_or_explore = np.append(self.exploit_or_explore, "explore")
             action = np.random.randint(0, self.nA)
         else:
             self.exploit_or_explore = np.append(self.exploit_or_explore, "exploit")
             start_time = time.time()
-            action_vals = self.model.predict(encoded_state , verbose=0)
-            end_time = time.time()
-            print("Time taken to Predict: {:.4f} seconds".format(end_time - start_time))  
-            action = np.argmax(action_vals[0])
 
+            # ✅ Direct model forward call (no .predict → no graph conflict)
+            action_vals = self.model(encoded_state, training=False)
+            end_time = time.time()
+            print(f"[AGENT] Time taken to predict: {end_time - start_time:.4f}s")
+
+            # Convert to NumPy for argmax
+            action = np.argmax(action_vals.numpy()[0])
+
+        # 5️⃣ Get subset of servers for this action
         return_arr = subsets[action]
-   
-        self.episode_access_rate = np.append(self.episode_access_rate, float(len(return_arr))/no_of_edges)
-        self.action = np.append(self.action, [subsets[action]])
-        return return_arr , action 
+
+        # 6️⃣ Log and return
+        self.episode_access_rate = np.append(self.episode_access_rate, len(return_arr) / self.beta)
+        self.action = np.append(self.action, [return_arr])
+
+        return return_arr, action
+
+
 
     def experience_replay(self, batch_size):
         minibatch = random.sample(self.memory, batch_size)
@@ -160,18 +230,6 @@ class DQNAgent:
         for server in servers_to_be_queried:
             min_delay = min(min_delay, self.server_list[server].get_delays(state, server, self.request))
         return min_delay
-    
-    def process_request(self, request: user.Request):
-        self.request = request  # store current request
-
-        state = request.to_state()  # get current state
-        next_state = request.get_next_state()  # simulate next state (can be same for now)
-
-        action_subset, action_index = self.get_action(state)
-        reward = self.reward(action_subset, state)
-
-        self.store(state, action_index, reward, next_state)
-
 
     def reward(self, action, state):
         """

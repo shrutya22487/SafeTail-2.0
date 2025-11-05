@@ -148,7 +148,7 @@ class Receiver:
                         try:
                             arr = np.array(arr, dtype=object)
                         except Exception:
-                            print(f"[!] Failed to coerce payload from {addr}; skipping.")
+                            print(f"[RECEIVER,!] Failed to coerce payload from {addr}; skipping.")
                             continue
 
                     # summary and debug print (type + short repr) and extract ids
@@ -164,13 +164,13 @@ class Receiver:
                                     r = r[:200] + "..."
                             except Exception:
                                 r = "<repr-failed>"
-                            print(f"    [DBG] item[{idx}]: type={mod}.{name}, repr={r}")
+                            print(f"[RECEIVER]    [DBG] item[{idx}]: type={mod}.{name}, repr={r}")
                         except Exception:
-                            print(f"    [DBG] item[{idx}]: type={type(req)}")
+                            print(f"[RECEIVER]    [DBG] item[{idx}]: type={type(req)}")
 
                         ids.append(self._extract_request_id(req))
 
-                    print(f"[>] Received chunk from {addr}: len={len(arr)}, ids={ids}")
+                    print(f"[RECEIVER, >] Received chunk from {addr}: len={len(arr)}, ids={ids}")
 
                     # persist chunk
                     if self.PERSIST_CHUNKS:
@@ -185,7 +185,7 @@ class Receiver:
 
                     # Pass directly to controller queue
                     self.controller.send_to_server(arr)
-                    
+
                     # OR Simluate processing time
                     # if simulate_processing and self.PROCESS_TIME_PER_CHUNK > 0:
                     #     time.sleep(self.PROCESS_TIME_PER_CHUNK)
@@ -196,14 +196,14 @@ class Receiver:
                         pass
 
         except Exception as e:
-            print(f"[!] Exception while processing {addr}: {e}")
+            print(f"[RECEIVER, !] Exception while processing {addr}: {e}")
         finally:
-            print(f"[-] Finished processing {addr}")
+            print(f"[RECEIVER, -] Finished processing {addr}")
 
     def run(self):
         pending = deque()
-        print(f"[SERVER] Listening on {self.host}:{self.port} (tcp_backlog={self.tcp_backlog})")
-        print(f"[CONFIG] MAX_QUEUE={self.MAX_QUEUE}, ACCEPT_WINDOW_SEC={self.ACCEPT_WINDOW_SEC}\n")
+        print(f"[RECEIVER] Listening on {self.host}:{self.port} (tcp_backlog={self.tcp_backlog})")
+        print(f"[RECEIVER] MAX_QUEUE={self.MAX_QUEUE}, ACCEPT_WINDOW_SEC={self.ACCEPT_WINDOW_SEC}\n")
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -256,9 +256,9 @@ class Receiver:
                             continue
 
             except KeyboardInterrupt:
-                print("\n[SERVER] Shutting down (KeyboardInterrupt).")
+                print("\n[RECEIVER] Shutting down (KeyboardInterrupt).")
             finally:
-                print("[SERVER] Closing remaining pending connections.")
+                print("[RECEIVER] Closing remaining pending connections.")
                 while pending:
                     conn, _ = pending.popleft()
                     try:
@@ -275,4 +275,4 @@ class Receiver:
 
     def stop(self):
         self._stop_event.set()
-        print("[SERVER] Stop requested.")
+        print("[RECEIVER] Stop requested.")

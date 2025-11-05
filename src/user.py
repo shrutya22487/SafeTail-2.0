@@ -87,10 +87,16 @@ class Request:
         }
 
     def __repr__(self) -> str:
-        return (
-            f"<Request id={self.request_id} pid={self.process_id} msg={self.message_size}B "
-            f"load_len={self.load.size} ram={self.ram_usage} cpu={self.cpu_usage}>"
-        )
+        attrs = vars(self)  # gets all instance attributes as a dict
+        formatted = []
+        for key, val in attrs.items():
+            # Make numpy arrays shorter & readable
+            if isinstance(val, np.ndarray):
+                val_str = f"ndarray(shape={val.shape}, dtype={val.dtype})"
+            else:
+                val_str = val
+            formatted.append(f"{key}={val_str}")
+        return f"<Request {' '.join(formatted)}>"
 
 
 class Users:

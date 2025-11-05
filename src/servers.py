@@ -14,9 +14,21 @@ TIME_SCALE = 10.0  # factor to speed up time in simulation
 # TODO(@shrutya22487): change the server indexing, time scaling etc if needed
 class Server:
     def __init__(self, server_index):
-        with open("../data/propagation_delays.pkl", 'rb') as f:
+        base_dir = Path(__file__).resolve().parent  # Points to src/
+
+        # Load propagation delays
+        propagation_file = base_dir.parent / "data" / "propagation_delays.pkl"
+        if not propagation_file.exists():
+            raise FileNotFoundError(f"Propagation delays file not found: {propagation_file}")
+
+        with open(propagation_file, 'rb') as f:
             self.propagation_delays = pickle.load(f)
-        self.server_data_path = f"../data/server{server_index}.csv"
+
+        # Load server data path
+        self.server_data_path = base_dir.parent / "data" / f"server{server_index}.csv"
+        if not self.server_data_path.exists():
+            raise FileNotFoundError(f"Server data CSV not found: {self.server_data_path}")
+        
         self.server_data = pd.read_csv(self.server_data_path)
         self.server_index = server_index
         self.num_requests = 0
@@ -34,6 +46,7 @@ class Server:
 
     def _get_propogation_delay(self):
         return random.choice(self.propagation_delays[self.server_index - 1])
+    
     def _get_tramission_delay(self, message_size, upload_bandwidth, download_bandwidth):
         message_size = 8 * message_size
         uplink = upload_bandwidth * 1000
@@ -155,16 +168,25 @@ class Server:
         propagation_delay_for_node = self._get_propogation_delay()
 
         # transmission: same as before
-        tramission_delay_for_node = self._get_tramission_delay(
-            request.message_size,
-            request.bandwidth / request.load[self.server_index],
-            request.bandwidth / request.load[self.server_index]
-        )
+        try:
+            tramission_delay_for_node = self._get_tramission_delay(
+                request.message_size,
+                request.bandwidth / request.load[self.server_index-1],
+                request.bandwidth / request.load[self.server_index-1]
+            )
+        except IndexError as e:
+            print(f"[SERVER]    [ERROR] IndexError while accessing load[{self.server_index}]: {e}")
+            print(f"[SERVER]     Load array size: {len(request.load)}, server_index: {self.server_index}")
+            tramission_delay_for_node = float('inf')  # or some default fallback value
+        except Exception as e:
+            print(f"[SERVER]    [ERROR] Unexpected error in transmission delay calculation: {e}")
+            tramission_delay_for_node = float('inf')  # fallback value
+
 
         # computation: choose the best combined row if possible
         selected_row = self._choose_combination_row_for_request(request)
         
-        print(f"Row selected for request with process_id: {request.process_id + 2} is {selected_row + 2}", end='')
+        print(f"Row selected for request with process_id: {request.process_id + 2} is {selected_row + 2}", end='\n')
 
         if selected_row is None:
             # fallback to the request's own process_id
@@ -173,6 +195,7 @@ class Server:
             proc_row_num = int(selected_row)
 
         computation_delay_for_node = self._get_computation_delay(proc_row_num)
+        
 
         return propagation_delay_for_node + tramission_delay_for_node + computation_delay_for_node
 
@@ -208,7 +231,6 @@ class Server:
             return False, "server full", 1e9
 
         proc_time = self.get_delays(request)
-
         start_time = current_time
         finish_time = start_time + proc_time
 

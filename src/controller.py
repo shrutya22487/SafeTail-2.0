@@ -8,7 +8,7 @@ from pathlib import Path
 
 import servers
 import constants
-from agent import DQNAgent, get_state_input
+from agent import DQNAgent
 
 class Controller:
     def __init__(self, num_servers=5, server_state_csv="server_state.csv"):
@@ -51,7 +51,7 @@ class Controller:
         return np.array(free)
 
     def dispatch_to_agent(self, request):
-        state = request.to_state()
+        
         agent = DQNAgent(
             states=constants.nS,
             actions=constants.nA,
@@ -69,15 +69,38 @@ class Controller:
             server_list = self.server_list,
             request=None  # will be set per request
         )
-        return agent.get_action(state)[0]
+        
+        return agent.get_action(request)
 
     def assign_request(self, request, indices):
+        
+        print(f"[CONTROLLER, ASSIGN] Assigning Request {request.request_id} to servers: {indices}")
+
         for i in indices:
-            ok, finish, proc = self.server_list[i].schedule_request(request)
-            if ok:
-                print(f"[ASSIGN] Req {request.request_id} → Server {i+1} ({proc:.3f}s)")
-            else:
-                print(f"[BUSY] Server {i+1} full for Req {request.request_id}")
+            
+            # Debug statements
+            # print(f"Index is {i}")
+            # print(f"server_index is {self.server_list[i].server_index}")
+            # print(f"server_list length is {len(self.server_list)}")
+            
+            try:
+                ok, finish, proc = self.server_list[i].schedule_request(request)
+
+                if ok:
+                    print(f"[CONTROLLER, ASSIGN] Req {request.request_id} → Server {i+1} ({proc:.3f}s)")
+                else:
+                    print(f"[CONTROLLER, BUSY] Server {i+1} full for Req {request.request_id}")
+
+            except (IndexError, TypeError) as e:
+                print(f"[CONTROLLER, ERROR:1] {e}")
+                break
+            except Exception as e:
+                print(f"[CONTROLLER, ERROR:2] Unexpected error for Req {request.request_id} on server {i}: {e}")
+            
+        print("\n---- ---- ---- \n")
+
+
+
 
     # ---- Controller loop ----
     def send_to_server(self, chunk):
@@ -88,16 +111,19 @@ class Controller:
             with self.lock:
                 arr = chunk
                 
-            print(f"[PROCESS] Dequeued chunk with {len(arr)} requests.")
+            print(f"[CONTROLLER, PROCESS] Dequeued chunk with {len(arr)} requests.")
             for req in arr:
                 free = self.find_free_servers()
                 if not len(free):
-                    print("[QUEUE] All servers busy. Retrying shortly.")
+                    print("[CONTROLLER, QUEUE] All servers busy. Retrying shortly.")
                     time.sleep(0.1)
                     continue
                 req.load = np.array([s.num_requests for s in self.server_list])
-                decision = self.dispatch_to_agent(req)
-                self.assign_request(req, decision)
+                
+                # decision
+                action_subset, action_index = self.dispatch_to_agent(req)
+                
+                self.assign_request(req, action_subset)
                 
     def run(self):
         # ---------------- start receiver ----------------

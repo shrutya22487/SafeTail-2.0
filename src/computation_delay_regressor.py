@@ -10,6 +10,7 @@ from sklearn.linear_model import Ridge, ElasticNet
 from sklearn.preprocessing import StandardScaler
 from sklearn.base import BaseEstimator, RegressorMixin
 import warnings
+from pathlib import Path
 warnings.filterwarnings("ignore")
 
 EPS = 1e-10
@@ -273,10 +274,19 @@ def preprocess_dataframe(df_raw):
 # --- Prediction pipeline ---
 def predict_rows(server_index, row_num=None, verbose=True):
     
-    model_path = "../models/regressor_model.pkl"
-    pipeline_path = "../models/full_pipeline.pkl"
-    input_csv = f"../data/server{server_index}.csv"
-    output_csv = "../data/predictions.csv"
+    # Base directory (this file's folder)
+    base_dir = Path(__file__).resolve().parent  # e.g., .../src/
+
+    # Paths relative to the project root
+    model_path = base_dir.parent / "models" / "regressor_model.pkl"
+    pipeline_path = base_dir.parent / "models" / "full_pipeline.pkl"
+    input_csv = base_dir.parent / "data" / f"server{server_index}.csv"
+    output_csv = base_dir.parent / "data" / "predictions.csv"
+
+    # Safety checks
+    for path in [model_path, pipeline_path, input_csv]:
+        if not path.exists():
+            raise FileNotFoundError(f"Required file not found: {path}")
     
     # load model & pipeline
     model = load_pickle(model_path)

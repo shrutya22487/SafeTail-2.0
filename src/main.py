@@ -12,7 +12,6 @@ from types import SimpleNamespace
 from receiver import Receiver
 from sender_bursts import SenderBursts
 import user
-import servers
 from controller import Controller
 
 # --- request factory that uses the actual Request signature ---
@@ -54,7 +53,7 @@ def request_factory(i: int):
 
 def main():
     # --------------- setup controller ---------------
-    controller = Controller()  
+    controller = Controller(num_servers=2)  
     # ---------------- setup receiver ----------------
     receiver = Receiver(persist_chunks=True, process_time_per_chunk=0.2, controller=controller)
     
@@ -64,7 +63,7 @@ def main():
     # ---------------- create sender ----------------
     sender = SenderBursts(
         arr=None,               # auto-generate using request_factory
-        sample_count=120,       # total requests
+        sample_count=12,       # total requests
         chunk_size=12,          # requests per chunk
         bursts=5,
         min_burst=1,
