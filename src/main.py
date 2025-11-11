@@ -53,7 +53,7 @@ def request_factory(i: int):
 
 def main():
     # --------------- setup controller ---------------
-    controller = Controller(num_servers=2)  
+    controller = Controller(num_servers=1)  #Change number of servers accordingly
     # ---------------- setup receiver ----------------
     receiver = Receiver(persist_chunks=True, process_time_per_chunk=0.2, controller=controller)
     

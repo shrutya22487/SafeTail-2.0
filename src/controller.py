@@ -11,11 +11,7 @@ import constants
 from agent import DQNAgent
 
 class Controller:
-    def __init__(self, num_servers=5, server_state_csv="server_state.csv"):
-        base_dir = Path(__file__).resolve().parent  # This points to src/
-        self.server_state_csv = base_dir.parent / "data" / server_state_csv
-        if not self.server_state_csv.exists():
-            raise FileNotFoundError(f"Detect CSV not found: {self.detect_csv}")
+    def __init__(self, num_servers=5):
         
         self.num_servers = num_servers
         self.server_list = [servers.Server(i + 1) for i in range(num_servers)]
@@ -23,32 +19,10 @@ class Controller:
         self.lock = threading.Lock()
         self.receiver_queue = None  # to be attached later
 
-
-    # ---- Internal utility methods ----
-    def read_server_state(self):
-        """
-        Randomly sample one row from the CSV (ignoring Timestamp column)
-        and assign it as current load (num_requests) for each server.
-        """
-        try:
-            df = pd.read_csv(self.server_state_csv)
-            # Drop the Timestamp column
-            df = df.drop(columns=["Timestamp"])
-            
-            # Randomly pick one row
-            sampled_row = df.sample(n=1).iloc[0]
-
-            # Assign to servers
-            for i, srv in enumerate(self.server_list):
-                srv.num_requests = int(sampled_row[i])
-
-        except Exception as e:
-            print(f"[!] Could not read {self.server_state_csv}: {e}")
-
     def find_free_servers(self):
         now = time.time()
-        free = [i for i, s in enumerate(self.server_list) if s.check_server_availability(now)]
-        return np.array(free)
+        load = [(i, s.check_server_availability(now)) for i, s in enumerate(self.server_list)]
+        return np.array(load)
 
     def dispatch_to_agent(self, request):
         
@@ -105,7 +79,6 @@ class Controller:
     # ---- Controller loop ----
     def send_to_server(self, chunk):
         print("[CONTROLLER] Starting main control loop.")
-        self.read_server_state()
 
         while True:
             with self.lock:
@@ -113,12 +86,20 @@ class Controller:
                 
             print(f"[CONTROLLER, PROCESS] Dequeued chunk with {len(arr)} requests.")
             for req in arr:
-                free = self.find_free_servers()
-                if not len(free):
+                load = self.find_free_servers()
+
+                num_free = 0
+                for _ in range(len(load)):
+                    if(load[_] != 1e9):
+                        num_free += 1
+                if(num_free == 0):
                     print("[CONTROLLER, QUEUE] All servers busy. Retrying shortly.")
                     time.sleep(0.1)
                     continue
-                req.load = np.array([s.num_requests for s in self.server_list])
+                
+                req.load = np.array(load)
+                
+                req.total_delay = [self.server_list[i].compute_request_time(req) for i in range(self.num_servers)]
                 
                 # decision
                 action_subset, action_index = self.dispatch_to_agent(req)
