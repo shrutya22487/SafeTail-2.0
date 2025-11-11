@@ -21,7 +21,7 @@ class Controller:
 
     def find_free_servers(self):
         now = time.time()
-        load = [(i, s.check_server_availability(now)) for i, s in enumerate(self.server_list)]
+        load = [s.check_server_availability(now) for s in self.server_list]
         return np.array(load)
 
     def dispatch_to_agent(self, request):
@@ -32,7 +32,7 @@ class Controller:
             alpha=constants.alpha,
             reward_gamma=constants.discount_rate,
             epsilon=1.0,
-            epsilon_min=0.01,
+            epsilon_min = 0.000001,
             epsilon_decay=constants.gamma_decay,
             batch_size=constants.batch_size,
             beta=constants.beta,
@@ -44,6 +44,8 @@ class Controller:
             request=None  # will be set per request
         )
         
+        # agent.plot_training_curves()
+        
         return agent.get_action(request)
 
     def assign_request(self, request, indices):
@@ -52,7 +54,7 @@ class Controller:
 
         for i in indices:
             
-            # Debug statements
+            # # Debug statements
             # print(f"Index is {i}")
             # print(f"server_index is {self.server_list[i].server_index}")
             # print(f"server_list length is {len(self.server_list)}")

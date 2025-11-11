@@ -3,6 +3,8 @@ import numpy as np
 import time
 from collections import deque
 import tensorflow.keras as keras
+import matplotlib.pyplot as plt
+import tensorflow as tf
 
 from keras.layers import Dense
 from keras.optimizers import Adam
@@ -34,15 +36,18 @@ def request_to_state_array(request_obj):
     """
     Converts a Request object into a flattened numeric NumPy array.
     Handles nested arrays, lists, dicts, and None values safely.
-    Skips invalid or non-numeric entries gracefully.
+    Replaces None or invalid numeric values with -1.0.
     """
+    import numpy as np
+    import traceback
+
     flat_values = []
 
     for attr, value in vars(request_obj).items():
         try:
-            # None → 0.0
+            # None → -1.0
             if value is None:
-                flat_values.append(0.0)
+                flat_values.append(-1.0)
 
             # Scalars (int, float, numpy scalar)
             elif isinstance(value, (int, float, np.integer, np.floating)):
@@ -55,28 +60,35 @@ def request_to_state_array(request_obj):
                     flat_values.extend(arr.tolist())
                 except Exception as e:
                     print(f"[AGENT]    [WARN] Could not convert array-like attribute '{attr}' → {type(value)}: {e}")
+                    flat_values.append(-1.0)
                     continue
 
             # Dictionaries (flatten recursively)
             elif isinstance(value, dict):
                 for k, v in value.items():
                     try:
-                        if isinstance(v, (int, float, np.integer, np.floating)):
+                        if v is None:
+                            flat_values.append(-1.0)
+                        elif isinstance(v, (int, float, np.integer, np.floating)):
                             flat_values.append(float(v))
                         elif isinstance(v, (list, tuple, np.ndarray)):
                             arr = np.asarray(v, dtype=float).flatten()
                             flat_values.extend(arr.tolist())
+                        else:
+                            flat_values.append(-1.0)
                     except Exception as e:
                         print(f"[AGENT]    [WARN] Could not process dict key '{k}' in '{attr}': {e}")
+                        flat_values.append(-1.0)
                         continue
 
-            # Ignore strings, models, and unsupported types
+            # Unsupported types (like strings or objects) → -1.0
             else:
-                continue
+                flat_values.append(-1.0)
 
         except Exception as e:
             print(f"[AGENT]    [ERROR] Failed to process attribute '{attr}' ({type(value)}): {e}")
             traceback.print_exc()
+            flat_values.append(-1.0)
             continue
 
     # Final safety conversion
@@ -85,7 +97,7 @@ def request_to_state_array(request_obj):
     except Exception as e:
         print(f"[AGENT]    [FATAL] Could not create NumPy array from collected values: {e}")
         traceback.print_exc()
-        return np.zeros(1, dtype=float)  # fallback to a safe dummy vector
+        return np.full(1, -1.0, dtype=float)  # fallback to safe dummy vector
 
 
 
@@ -110,7 +122,7 @@ class DQNAgent:
         self.epochs = epochs
 
         # Encoder: projects variable-length state vectors to fixed size
-        self.encoder = Encoder(input_dim=self.nS, output_dim=encoder_output_dim)
+        self.encoder = Encoder(hidden_dim=128, output_dim=encoder_output_dim)
 
         # RL model: same as before
         self.model = self.build_model(encoder_output_dim)
@@ -129,6 +141,20 @@ class DQNAgent:
 
         self.request = request
         self.server_list = server_list
+        
+        self.prediction_times = []
+        
+    def timed_predict(self, state_tensor):
+        """Runs model inference and measures time."""
+        start_time = time.time()
+        q_values = self.model(state_tensor, training=False)
+        end_time = time.time()
+
+        elapsed = end_time - start_time
+        self.prediction_times.append(elapsed)
+
+        print(f"[AGENT] ⏱ Prediction time: {elapsed:.6f}s")
+        return q_values
 
     def build_model(self, encoded_dim):
         model = keras.Sequential() 
@@ -152,8 +178,8 @@ class DQNAgent:
         next_state_vec = request_to_state_array(next_state_request).reshape(1, -1)
 
         # Encode using the same encoder as before
-        encoded_state = self.encoder(state_vec)
-        encoded_next_state = self.encoder(next_state_vec)
+        encoded_state = self.encoder(state_vec, training=False).numpy()
+        encoded_next_state = self.encoder(next_state_vec, training=False).numpy()
 
         # Append to replay memory
         self.memory.append((encoded_state, action, reward, encoded_next_state))
@@ -167,9 +193,12 @@ class DQNAgent:
 
         # 1️⃣ Convert Request object → numeric state vector
         state_flattened = request_to_state_array(request).reshape(1, -1)
+        state_flattened_tf = tf.convert_to_tensor(state_flattened.reshape(1, -1, 1), dtype=tf.float32)
 
         # 2️⃣ Encode using your encoder (no .numpy())
-        encoded_state = self.encoder(state_flattened, training=False)
+        encoded_state = self.encoder(state_flattened_tf, training=False)
+        
+        print(f"[AGENT] Encoded state shape: {encoded_state.shape}")
 
         # 3️⃣ Build all possible non-empty subsets of servers (0-based indexing)
         subsets = get_subsets(set(range(self.beta)))
@@ -178,14 +207,11 @@ class DQNAgent:
         if np.random.rand() <= self.epsilon:
             self.exploit_or_explore = np.append(self.exploit_or_explore, "explore")
             action = np.random.randint(0, self.nA)
+
         else:
             self.exploit_or_explore = np.append(self.exploit_or_explore, "exploit")
-            start_time = time.time()
-
             # ✅ Direct model forward call (no .predict → no graph conflict)
-            action_vals = self.model(encoded_state, training=False)
-            end_time = time.time()
-            print(f"[AGENT] Time taken to predict: {end_time - start_time:.4f}s")
+            action_vals = self.timed_predict(encoded_state)
 
             # Convert to NumPy for argmax
             action = np.argmax(action_vals.numpy()[0])
@@ -220,6 +246,8 @@ class DQNAgent:
 
         self.loss = np.append(self.loss, hist.history['loss'][0])
         self.val_loss = np.append(self.val_loss, hist.history['val_loss'][0])
+
+
         
     def get_min_delay(self, state, servers_to_be_queried):
         """
@@ -269,3 +297,18 @@ class DQNAgent:
                 self.experience_replay(self.batch_size)
 
             return reward
+        
+        
+    def plot_training_curves(self):
+        """Plots training and validation loss over replay iterations."""
+        plt.figure(figsize=(8, 5))
+        plt.plot(self.loss, label='Training Loss', linewidth=2)
+        if len(self.val_loss) > 0:
+            plt.plot(self.val_loss, label='Validation Loss', linestyle='--', alpha=0.8)
+        plt.xlabel("Training Iterations")
+        plt.ylabel("Loss")
+        plt.title("DQN Model Convergence")
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.tight_layout()
+        plt.show()
