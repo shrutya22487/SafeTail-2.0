@@ -5,13 +5,16 @@ import pandas as pd
 import time
 import user
 from pathlib import Path
-import computation_delay_regressor
 import sys
+import os
+import importlib
+
+# fixed bandwidth (kbps) used for both uplink and downlink when request doesn't specify bandwidth/load
+FIXED_BANDWIDTH_KBPS = 1000.0
+
+MAX_CONCURRENT_REQUESTS = 4
 
 
-TIME_SCALE = 10.0  # factor to speed up time in simulation
-
-# TODO(@shrutya22487): change the server indexing, time scaling etc if needed
 class Server:
     def __init__(self, server_index):
         base_dir = Path(__file__).resolve().parent  # Points to src/
@@ -28,209 +31,187 @@ class Server:
         self.server_data_path = base_dir.parent / "data" / f"server{server_index}.csv"
         if not self.server_data_path.exists():
             raise FileNotFoundError(f"Server data CSV not found: {self.server_data_path}")
-        
+
         self.server_data = pd.read_csv(self.server_data_path)
+        self.server_data.columns = [c.strip() for c in self.server_data.columns]
+
         self.server_index = server_index
         self.num_requests = 0
         self.requests = []
         self.active_requests = []
 
+        # Attempt to import predictor classes from server{index}_regressor folder only
+        self._load_predictors_from_regressor_folder(base_dir, server_index)
+
+    def _load_predictors_from_regressor_folder(self, base_dir: Path, server_index: int):
+        self.predictors = {'d': None, 's': None, 'p': None}
+        reg_folder = base_dir / f"server{server_index}_regressor"
+        if not reg_folder.exists() or not reg_folder.is_dir():
+            return
+
+        sys.path.insert(0, str(reg_folder))
+        try:
+            # detect
+            try:
+                detect_mod = importlib.import_module("detect_predictor")
+                DetectCls = getattr(detect_mod, "DetectPredictor", None)
+                if DetectCls:
+                    self.predictors['d'] = DetectCls()
+            except Exception:
+                self.predictors['d'] = None
+
+            # speech
+            try:
+                speech_mod = importlib.import_module("speech_predictor")
+                SpeechCls = getattr(speech_mod, "SpeechPredictor", None)
+                if SpeechCls:
+                    self.predictors['s'] = SpeechCls()
+            except Exception:
+                self.predictors['s'] = None
+
+            # predict
+            try:
+                predict_mod = importlib.import_module("predict_predictor")
+                PredictCls = getattr(predict_mod, "PredictPredictor", None)
+                if PredictCls:
+                    self.predictors['p'] = PredictCls()
+            except Exception:
+                self.predictors['p'] = None
+
+        finally:
+            # keep path inserted for the runtime; remove if you prefer cleanup
+            pass
+
     def print_active_requests(self):
         print(f"Server {self.server_index} Active Requests:")
         for ar in self.active_requests:
-            req = ar['request']
             start = ar['start_time']
             finish = ar['finish_time']
             proc = ar['proc_time']
-            print(f"  Request Process ID: {req.process_id}, Start: {start:.2f}, Finish: {finish:.2f}, Proc Time: {proc:.2f}")
+            print(f"  Start: {start:.2f}, Finish: {finish:.2f}, Proc Time: {proc:.6f}")
 
     def _get_propogation_delay(self):
         return random.choice(self.propagation_delays[self.server_index - 1])
-    
-    def _get_tramission_delay(self, message_size, upload_bandwidth, download_bandwidth):
-        message_size = 8 * message_size
-        uplink = upload_bandwidth * 1000
-        downlink = download_bandwidth * 1000
-        return (message_size / uplink) + (message_size / downlink)
 
-    def _get_computation_delay(self, process_row_num):
-        return computation_delay_regressor.predict_rows(row_num=process_row_num, server_index=self.server_index)
+    def _get_tramission_delay(self, message_size_bytes, upload_bandwidth_kbps, download_bandwidth_kbps):
+        """
+        message_size_bytes: bytes
+        bandwidths: kbps (kilobits per second)
+        Convert to bits and compute (message_bits / uplink_bits_per_sec) + (message_bits / downlink_bits_per_sec)
+        """
+        message_bits = 8 * float(message_size_bytes)
+        uplink_bps = float(upload_bandwidth_kbps) * 1000.0
+        downlink_bps = float(download_bandwidth_kbps) * 1000.0
+        # avoid division by zero
+        if uplink_bps <= 0 or downlink_bps <= 0:
+            return float('inf')
+        return (message_bits / uplink_bps) + (message_bits / downlink_bps)
 
-    def _cpu_mean_from_str(self, cpu_str):
-        """
-        cpu_str is expected like "2.5, 2.5, 40.4, 18.7, ..."
-        returns mean of parsed floats, or 0.0 if parsing fails / empty.
-        """
-        if not isinstance(cpu_str, str) or cpu_str.strip() == "":
-            return 0.0
-        try:
-            parts = [p.strip() for p in cpu_str.split(',') if p.strip() != '']
-            nums = [float(p) for p in parts]
-            if len(nums) == 0:
-                return 0.0
-            return float(np.mean(nums))
-        except Exception:
-            return 0.0
-
-    def _choose_combination_row_for_request(self, request):
-        """
-        Inspect currently visible active requests, build the 'combination' string
-        (existing requests in start_time order, then the new request's type),
-        then find matching rows in self.server_data and pick the row with the
-        maximum (mean CPU usage + GPU usage) score. Returns the selected
-        row index (integer) or None if fallback required.
-        """
-        if len(self.active_requests) == 0:
-            return request.process_id
-        # 1) get types of currently visible active requests in order of start_time
-        existing_types = []
-        # Sort visible actives by start_time to ensure deterministic ordering
+    def _collect_visible_types(self):
         sorted_active = sorted(self.active_requests, key=lambda ar: ar['start_time'])
+        types = []
         for ar in sorted_active:
             try:
-                proc_id = ar['request'].process_id
-                # ensure proc_id index exists
-                if 0 <= int(proc_id) < len(self.server_data):
-                    comb = str(self.server_data.iloc[int(proc_id)]['Combination'])
-                    # if Combination is a multi-character string, treat its first char as the "type"
-                    # but from your description, single-combination processes are single-letter like "s" or "p".
-                    # We'll append the whole combination entry for safety, but typical rows are single-letter.
-                    # However we only want the 'type' that corresponding to the process - which should be a single char.
-                    existing_types.append(comb)
-                else:
-                    existing_types.append("")  # unknown
+                comb = getattr(ar['request'], 'combination', '')
+                comb_str = str(comb).strip() if comb is not None else ''
+                types.append(comb_str[0] if comb_str else '')
             except Exception:
-                existing_types.append("")
+                types.append('')
+        return types
 
-        # 2) determine the new request type (from its process_id row)
-        new_type = ""
-        try:
-            new_pid = int(request.process_id)
-            if 0 <= new_pid < len(self.server_data):
-                new_type = str(self.server_data.iloc[new_pid]['Combination'])
-            else:
-                new_type = ""
-        except Exception:
-            new_type = ""
+    def _predict_using_letter(self, letter: str, combined_str: str) -> float:
+        if not letter:
+            return 0.0
 
-        # Build the combined string: concatenate existing types in order then the new_type
-        # Example: existing 'p' and new 's' => combined 'p' + 's' -> 'ps'
-        # If existing entries are themselves multi-letter combos, we concatenate them as-is.
-        combined_string = "".join(existing_types) + new_type
-
-        # If combined_string is empty or yields no matches, fall back to original single process row
-        if combined_string == "":
-            return None
-
-        # 3) find matching rows in the server data by 'Combination'
-        # Make sure column exists
-        if 'Combination' not in self.server_data.columns:
-            return None
-
-        matches = self.server_data[self.server_data['Combination'] == combined_string]
-        if matches.empty:
-            # no direct match found
-            return None
-
-        # 4) compute score for each candidate row and pick the row index with maximum score
-        # Score = mean_cpu_usage + gpu_usage (treat NaN/parse errors as 0)
-        best_idx = None
-        best_score = -np.inf
-        for idx, row in matches.iterrows():
-            cpu_mean = self._cpu_mean_from_str(row.get('CPU Usage Per Core', ""))
-            gpu = row.get('GPU Usage (%)', 0.0)
+        predictor = self.predictors.get(letter.lower())
+        if predictor is None:
+            # fallback to CSV value if available
             try:
-                if not np.isfinite(gpu):
-                    gpu = 0.0
+                mask = self.server_data['Combination'].astype(str).str.strip().str.lower() == letter.lower()
+                if mask.any():
+                    row = self.server_data[mask].iloc[0]
+                    t = row.get("Total Processing Time (sec)", None)
+                    if t is not None and not pd.isna(t):
+                        return float(t)
             except Exception:
-                gpu = 0.0
-            score = float(cpu_mean) + float(gpu)
-            if score > best_score:
-                best_score = score
-                best_idx = int(idx)
+                pass
+            return 0.0
 
-        return best_idx
+        try:
+            print(f"\n[SERVER]    Using predictor for letter '{letter}' with combined string '{combined_str}'\n")
+            return float(predictor.predict_from_combination(combined_str))
+        except Exception:
+            # fallback to CSV
+            try:
+                mask = self.server_data['Combination'].astype(str).str.strip().str.lower() == letter.lower()
+                if mask.any():
+                    row = self.server_data[mask].iloc[0]
+                    t = row.get("Total Processing Time (sec)", None)
+                    if t is not None and not pd.isna(t):
+                        return float(t)
+            except Exception:
+                pass
+            return 0.0
 
-    def get_delays(self, request: user.Request):
+    def _choose_first_letter_for_regressor(self, request):
+        existing_types = self._collect_visible_types()
+        try:
+            new_comb = str(getattr(request, 'combination', '')).strip()
+            new_letter = new_comb[0] if new_comb else ''
+        except Exception:
+            new_letter = ''
+
+        if new_letter == '':
+            return '', ''
+
+        rev_existing = "".join([t for t in reversed(existing_types) if t])
+        combined_string = new_letter + rev_existing
+        first_letter = combined_string[0] if combined_string else ''
+        return first_letter, combined_string
+
+    # ---------- Public API ----------
+    def compute_request_time(self, request: user.Request) -> float:
         """
-        Compute propagation + transmission + computation delays (orig, unscaled).
-
-        New behavior:
-          - When a new request arrives, we attempt to pick a combined-row
-            from the server CSV based on currently-running visible processes
-            + the incoming request. If a combined-row exists, we pass its
-            row index to the computation_delay regressor (instead of
-            the original request.process_id).
+        Compute and return total delay for `request` WITHOUT scheduling it.
+        Transmission uses FIXED_BANDWIDTH_KBPS when request does not provide load/bandwidth.
         """
-        sys.modules['__main__'].AdvancedEnsemble = computation_delay_regressor.AdvancedEnsemble
-
-        # propagation
+        # 1) propagation
         propagation_delay_for_node = self._get_propogation_delay()
 
-        # transmission: same as before
+        # 2) transmission (use fixed bandwidth; request may not have load or bandwidth)
         try:
+            # If request has a bandwidth attribute and load (deprecated), we ignore it per new requirement.
+            upl = FIXED_BANDWIDTH_KBPS
+            down = FIXED_BANDWIDTH_KBPS
             tramission_delay_for_node = self._get_tramission_delay(
-                request.message_size,
-                request.bandwidth / request.load[self.server_index-1],
-                request.bandwidth / request.load[self.server_index-1]
+                getattr(request, 'message_size', 0),
+                upl,
+                down
             )
-        except IndexError as e:
-            print(f"[SERVER]    [ERROR] IndexError while accessing load[{self.server_index}]: {e}")
-            print(f"[SERVER]     Load array size: {len(request.load)}, server_index: {self.server_index}")
-            tramission_delay_for_node = float('inf')  # or some default fallback value
         except Exception as e:
             print(f"[SERVER]    [ERROR] Unexpected error in transmission delay calculation: {e}")
-            tramission_delay_for_node = float('inf')  # fallback value
+            tramission_delay_for_node = float('inf')
 
+        # 3) computation: determine first letter and use predictor
+        first_letter, combined_str = self._choose_first_letter_for_regressor(request)
+        computation_delay_for_node = self._predict_using_letter(first_letter, combined_str)
 
-        # computation: choose the best combined row if possible
-        selected_row = self._choose_combination_row_for_request(request)
-        
-        print(f"Row selected for request with process_id: {request.process_id + 2} is {selected_row + 2}", end='\n')
-
-        if selected_row is None:
-            # fallback to the request's own process_id
-            proc_row_num = int(request.process_id)
-        else:
-            proc_row_num = int(selected_row)
-
-        computation_delay_for_node = self._get_computation_delay(proc_row_num)
-        
-
-        return propagation_delay_for_node + tramission_delay_for_node + computation_delay_for_node
-
-    def _scale_proc_time(self, proc_time: float) -> float:
-        return float(proc_time) / TIME_SCALE
-
-    def update_active_requests(self, current_time: float = None):
-        if current_time is None:
-            current_time = time.time()
-        freed = 0
-        remaining = []
-        for ar in self.active_requests:
-            if ar['finish_time'] <= current_time:
-                freed += 1
-                try:
-                    self.requests.remove(ar['request'])
-                except ValueError:
-                    pass
-                self.num_requests = max(0, self.num_requests - 1)
-            else:
-                remaining.append(ar)
-        self.active_requests = remaining
-        return freed
+        total_delay = propagation_delay_for_node + tramission_delay_for_node + computation_delay_for_node
+        return total_delay
 
     def schedule_request(self, request: user.Request, current_time: float = None, do_sleep: bool = False):
+        """
+        Compute time, schedule request if capacity, return (success, finish_time_or_reason, proc_time).
+        """
         if current_time is None:
             current_time = time.time()
 
-        if not self.check_server_availability(current_time=current_time):
-            # compute proc_time even if rejected so controller can log estimate
-            # orig_proc = self.get_delays(request)
-            # real_proc = self._scale_proc_time(orig_proc)
-            return False, "server full", 1e9
+        self.update_active_requests(current_time=current_time)
+        if self.num_requests >= MAX_CONCURRENT_REQUESTS:
+            estimated_proc = self.compute_request_time(request)
+            return False, "server full", estimated_proc
 
-        proc_time = self.get_delays(request)
+        proc_time = self.compute_request_time(request)
         start_time = current_time
         finish_time = start_time + proc_time
 
@@ -249,17 +230,36 @@ class Server:
 
         return True, finish_time, proc_time
 
+    # ---------- Remaining helpers ----------
+    def update_active_requests(self, current_time: float = None):
+        if current_time is None:
+            current_time = time.time()
+        freed = 0
+        remaining = []
+        for ar in self.active_requests:
+            if ar['finish_time'] <= current_time:
+                freed += 1
+                try:
+                    self.requests.remove(ar['request'])
+                except ValueError:
+                    pass
+                self.num_requests = max(0, self.num_requests - 1)
+            else:
+                remaining.append(ar)
+        self.active_requests = remaining
+        return freed
+
     def check_server_availability(self, current_time: float = None):
         if current_time is None:
             current_time = time.time()
         self.update_active_requests(current_time=current_time)
-        return self.num_requests < 4
+        return self.num_requests < MAX_CONCURRENT_REQUESTS
 
     def time_until_next_free(self, current_time: float = None):
         if current_time is None:
             current_time = time.time()
         self.update_active_requests(current_time=current_time)
-        if self.num_requests < 4:
+        if self.num_requests < MAX_CONCURRENT_REQUESTS:
             return 0.0
         visible_active = len(self.active_requests)
         hidden_count = max(0, self.num_requests - visible_active)
