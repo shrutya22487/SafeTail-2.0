@@ -12,6 +12,7 @@ from encoder import Encoder
 import servers
 import user
 import traceback
+from tensorflow.keras import layers
 
 def get_subsets(fullset):
     """Helper: return all non-empty subsets of a set"""
@@ -125,7 +126,7 @@ class DQNAgent:
         self.encoder = Encoder(hidden_dim=128, output_dim=encoder_output_dim)
 
         # RL model: same as before
-        self.model = self.build_model(encoder_output_dim)
+        self.model = self.build_model()
 
         # Stats (initialized as empty numpy arrays)
         self.loss = np.array([])
@@ -144,6 +145,7 @@ class DQNAgent:
         
         self.prediction_times = []
         
+        
     def timed_predict(self, state_tensor):
         """Runs model inference and measures time."""
         start_time = time.time()
@@ -156,26 +158,39 @@ class DQNAgent:
         print(f"[AGENT] ⏱ Prediction time: {elapsed:.6f}s")
         return q_values
 
-    def build_model(self, encoded_dim):
+
+    def build_model(self):
         model = keras.Sequential() 
-        model.add(keras.layers.Dense(encoded_dim*2, input_dim=encoded_dim, activation='sigmoid')) 
+        
+        # TODO:
+        # first of all should the encoder be a part of the model?
+        # Our encoder is currently not trained end-to-end with the DQN model.
+        
+        # Input size = nS, Hidden layer size = 2×nS, should this be changed to the dimensions of the encoder output?
+        model.add(keras.layers.Dense(self.nS*2, input_dim=self.nS, activation='sigmoid')) 
         model.add(keras.layers.BatchNormalization())
-        model.add(keras.layers.Dense(encoded_dim*4, activation='sigmoid')) 
+        model.add(keras.layers.Dense(self.nS*4, activation='sigmoid')) 
         model.add(keras.layers.BatchNormalization())
         model.add(keras.layers.Dense(self.nA, activation='softmax')) 
 
         model.compile(loss='categorical_crossentropy', 
                       optimizer=keras.optimizers.Adam(learning_rate=self.learning_rate)) 
         return model
-    
+
+
+    # TODO: 
+    # Instead of state, i am passing the request object itself.
+    # Earlier the next state was being passed, how do we handle that here?
+    # We dont have a next state request object in the current code.
     def store(self, state_request, action, reward, next_state_request):
         """
         Store experience (state, action, reward, next_state) into replay memory.
         Automatically converts Request objects into encoded vectors.
         """
+        
         # Convert request objects → flattened numpy arrays
-        state_vec = request_to_state_array(state_request).reshape(1, -1)
-        next_state_vec = request_to_state_array(next_state_request).reshape(1, -1)
+        state_vec = request_to_state_array(state_request).reshape(1, -1, 1)
+        next_state_vec = request_to_state_array(next_state_request).reshape(1, -1, 1)
 
         # Encode using the same encoder as before
         encoded_state = self.encoder(state_vec, training=False).numpy()
@@ -183,7 +198,7 @@ class DQNAgent:
 
         # Append to replay memory
         self.memory.append((encoded_state, action, reward, encoded_next_state))
-
+    
     
     def get_action(self, request):
         """
@@ -198,7 +213,9 @@ class DQNAgent:
         # 2️⃣ Encode using your encoder (no .numpy())
         encoded_state = self.encoder(state_flattened_tf, training=False)
         
+        # print(state_flattened)
         print(f"[AGENT] Encoded state shape: {encoded_state.shape}")
+        # print(encoded_state)
 
         # 3️⃣ Build all possible non-empty subsets of servers (0-based indexing)
         subsets = get_subsets(set(range(self.beta)))
@@ -210,7 +227,7 @@ class DQNAgent:
 
         else:
             self.exploit_or_explore = np.append(self.exploit_or_explore, "exploit")
-            # ✅ Direct model forward call (no .predict → no graph conflict)
+            
             action_vals = self.timed_predict(encoded_state)
 
             # Convert to NumPy for argmax
@@ -226,47 +243,63 @@ class DQNAgent:
         return return_arr, action
 
 
-
+    #TODO:
+    # Need to adapt this method to work with the encoded states.
+    # Since we are using request objects, 
+    # How to modify the state and next_state parameters here ?
     def experience_replay(self, batch_size):
-        minibatch = random.sample(self.memory, batch_size)
-        states, actions, rewards, next_states = zip(*minibatch)
-        states = np.vstack(states)
-        next_states = np.vstack(next_states)
+        minibatch = random.sample( self.memory, batch_size ) #Randomly sample from memory
+        states, actions, rewards, next_states = map(np.array, zip(*minibatch))
+        states = np.array(states)
+        current_q = self.model.predict(states, verbose =0)
 
-        current_q = self.model.predict(states, verbose=0)
-        next_q_values = self.model.predict(next_states, verbose=0)
+        next_q_values = self.model.predict(next_states,verbose =0)
 
         targets = current_q.copy()
         targets[np.arange(batch_size), actions] = (rewards) + self.reward_gamma * np.amax(next_q_values, axis=1) 
 
-        hist = self.model.fit(states, targets, epochs=self.epochs, verbose=0, validation_split=0.2)
+
+        hist = self.model.fit(states, targets, epochs=self.epochs, verbose=0 , validation_split=0.2)
 
         if self.epsilon > self.epsilon_min:
             self.epsilon -= self.epsilon_decay
 
-        self.loss = np.append(self.loss, hist.history['loss'][0])
-        self.val_loss = np.append(self.val_loss, hist.history['val_loss'][0])
-
-
+        loss_sum = hist.history['loss'][0]
+        val_loss_sum = hist.history['val_loss'][0]
         
-    def get_min_delay(self, state, servers_to_be_queried):
+
+        self.loss.append(loss_sum)
+        self.val_loss.append(val_loss_sum)
+    
+    
+    
+    #TODO: 
+    # @Shrutya :  verify usage of .compute_request_time() instead of the .get_delay() method.
+    def get_min_delay(self, request, servers_to_be_queried):
         """
         Query the servers and get the minimum delay among them.
         """
         min_delay = float('inf')
         
         for server in servers_to_be_queried:
-            min_delay = min(min_delay, self.server_list[server].get_delays(state, server, self.request))
+            min_delay = min(min_delay, self.server_list[server].compute_request_time(request))
         return min_delay
 
-    def reward(self, action, state):
+
+    #TODO: 
+    # @Shrutya :  verify usage of .compute_request_time() instead of the .get_delay() method.
+    # 
+    # 
+    # @Medha :  Review this reward function again. 
+    # Need to replace with new reward function.
+    def reward(self, action, request):
         """
         Used to compute min latency among chosen servers.
         """
         MEDIAN_LATENCY = self.median_computation_delay
 
         servers_to_be_queried = action
-        obs_latency = self.get_min_delay(state, servers_to_be_queried)
+        obs_latency = self.get_min_delay(request, servers_to_be_queried)
 
         # same reward structure as before
         if abs(obs_latency - MEDIAN_LATENCY) < 1000:
@@ -294,21 +327,7 @@ class DQNAgent:
             self.rewards = np.append(self.rewards, reward)    
 
             if len(self.memory) > self.batch_size:
+                print("[AGENT] Performing experience replay...")
                 self.experience_replay(self.batch_size)
 
             return reward
-        
-        
-    def plot_training_curves(self):
-        """Plots training and validation loss over replay iterations."""
-        plt.figure(figsize=(8, 5))
-        plt.plot(self.loss, label='Training Loss', linewidth=2)
-        if len(self.val_loss) > 0:
-            plt.plot(self.val_loss, label='Validation Loss', linestyle='--', alpha=0.8)
-        plt.xlabel("Training Iterations")
-        plt.ylabel("Loss")
-        plt.title("DQN Model Convergence")
-        plt.legend()
-        plt.grid(True, linestyle='--', alpha=0.6)
-        plt.tight_layout()
-        plt.show()
