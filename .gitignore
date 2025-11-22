@@ -211,3 +211,7 @@ models/regressor_model.pkl
 
 # Folders
 received_chunks/
+old_code/
+
+# Files
+safetail_new_architecture.pdf
