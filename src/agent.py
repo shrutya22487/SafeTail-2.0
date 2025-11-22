@@ -6,21 +6,17 @@ import tensorflow.keras as keras
 import matplotlib.pyplot as plt
 import tensorflow as tf
 
-from keras.layers import Dense
-from keras.optimizers import Adam
-from encoder import Encoder
 import servers
 import user
-import traceback
 from tensorflow.keras import layers
 
 def get_subsets(fullset):
     """Helper: return all non-empty subsets of a set"""
-    
+
     # Converting set to list for indexing
     listrep = list(fullset)
     subsets = []
-    
+
     # There are 2^n subsets for a set of size n
     # Looping over all the subsets
     for i in range(2**len(listrep)):
@@ -118,14 +114,12 @@ class DQNAgent:
         self.epsilon_min = epsilon_min
         self.epsilon_decay = epsilon_decay
         self.batch_size = batch_size
-        self.learning_rate = learning_rate 
+        self.learning_rate = learning_rate
         self.task = task
         self.epochs = epochs
 
-        # Encoder: projects variable-length state vectors to fixed size
-        self.encoder = Encoder(hidden_dim=128, output_dim=encoder_output_dim)
-
-        # RL model: same as before
+        # Encoder is now integrated into the model (no separate encoder instance)
+        # Build integrated Encoder + DQN model
         self.model = self.build_model()
 
         # Stats (initialized as empty numpy arrays)
@@ -142,10 +136,10 @@ class DQNAgent:
 
         self.request = request
         self.server_list = server_list
-        
+
         self.prediction_times = []
-        
-        
+
+
     def timed_predict(self, state_tensor):
         """Runs model inference and measures time."""
         start_time = time.time()
@@ -160,62 +154,70 @@ class DQNAgent:
 
 
     def build_model(self):
-        model = keras.Sequential() 
-        
-        # TODO:
-        # first of all should the encoder be a part of the model?
-        # Our encoder is currently not trained end-to-end with the DQN model.
-        
-        # Input size = nS, Hidden layer size = 2×nS, should this be changed to the dimensions of the encoder output?
-        model.add(keras.layers.Dense(self.nS*2, input_dim=self.nS, activation='sigmoid')) 
-        model.add(keras.layers.BatchNormalization())
-        model.add(keras.layers.Dense(self.nS*4, activation='sigmoid')) 
-        model.add(keras.layers.BatchNormalization())
-        model.add(keras.layers.Dense(self.nA, activation='softmax')) 
+        """
+        Build integrated model: Encoder + DQN layers (trained end-to-end).
+        Uses Functional API to handle variable-length inputs.
 
-        model.compile(loss='categorical_crossentropy', 
-                      optimizer=keras.optimizers.Adam(learning_rate=self.learning_rate)) 
+        Architecture:
+        - Input: (batch, variable_length, 1) - raw flattened request state
+        - Encoder: Dense → Dense → GlobalAvgPool → Dense (output: 32-dim)
+        - DQN: Dense → BN → Dense → BN → Dense (output: nA actions)
+        """
+        # Input: variable-length flattened state (batch, variable_length, 1)
+        encoder_input = keras.Input(shape=(None, 1), name='raw_state_input')
+
+        # ===== ENCODER LAYERS =====
+        # These will now be trained along with the DQN!
+        x = layers.Dense(128, activation='relu', name='encoder_expand')(encoder_input)
+        x = layers.Dense(64, activation='relu', name='encoder_project')(x)
+        x = layers.GlobalAveragePooling1D(name='encoder_pool')(x)  # (batch, 64)
+        encoded = layers.Dense(32, activation='relu', name='encoder_output')(x)  # (batch, 32)
+
+        # ===== DQN LAYERS (operating on fixed 32-dim encoded state) =====
+        x = layers.Dense(64, activation='sigmoid', name='dqn_hidden1')(encoded)
+        x = layers.BatchNormalization(name='dqn_bn1')(x)
+        x = layers.Dense(128, activation='sigmoid', name='dqn_hidden2')(x)
+        x = layers.BatchNormalization(name='dqn_bn2')(x)
+        q_values = layers.Dense(self.nA, activation='softmax', name='dqn_output')(x)
+
+        # Create the combined model
+        model = keras.Model(inputs=encoder_input, outputs=q_values, name='integrated_encoder_dqn')
+
+        model.compile(
+            loss='categorical_crossentropy',
+            optimizer=keras.optimizers.Adam(learning_rate=self.learning_rate)
+        )
+
+        print("[AGENT] ✅ Built integrated Encoder+DQN model (end-to-end trainable)")
+        print(model.summary())
         return model
 
 
-    # TODO: 
-    # Instead of state, i am passing the request object itself.
-    # Earlier the next state was being passed, how do we handle that here?
-    # We dont have a next state request object in the current code.
     def store(self, state_request, action, reward, next_state_request):
         """
-        Store experience (state, action, reward, next_state) into replay memory.
-        Automatically converts Request objects into encoded vectors.
+        Store RAW (unencoded) states in replay memory.
+        The model will encode them during training, allowing encoder to learn.
         """
-        
-        # Convert request objects → flattened numpy arrays
-        state_vec = request_to_state_array(state_request).reshape(1, -1, 1)
-        next_state_vec = request_to_state_array(next_state_request).reshape(1, -1, 1)
+        # Convert to flattened arrays and reshape to (variable_length, 1)
+        state_vec = request_to_state_array(state_request).reshape(-1, 1)
+        next_state_vec = request_to_state_array(next_state_request).reshape(-1, 1)
 
-        # Encode using the same encoder as before
-        encoded_state = self.encoder(state_vec, training=False).numpy()
-        encoded_next_state = self.encoder(next_state_vec, training=False).numpy()
+        # Store RAW states (NOT encoded!)
+        self.memory.append((state_vec, action, reward, next_state_vec))
 
-        # Append to replay memory
-        self.memory.append((encoded_state, action, reward, encoded_next_state))
-    
-    
+
     def get_action(self, request):
         """
         Selects an action (subset of servers) given the current Request.
         Uses epsilon-greedy strategy.
+        Model automatically encodes the raw state internally.
         """
 
-        # 1️⃣ Convert Request object → numeric state vector
-        state_flattened = request_to_state_array(request).reshape(1, -1)
-        state_flattened_tf = tf.convert_to_tensor(state_flattened.reshape(1, -1, 1), dtype=tf.float32)
+        # 1️⃣ Convert Request object → numeric state vector (variable length)
+        state_flattened = request_to_state_array(request)
 
-        # 2️⃣ Encode using your encoder (no .numpy())
-        encoded_state = self.encoder(state_flattened_tf, training=False)
-        
-        # print(state_flattened)
-        print(f"[AGENT] Encoded state shape: {encoded_state.shape}")
-        # print(encoded_state)
+        # 2️⃣ Reshape for model input: (1, variable_length, 1)
+        state_tensor = state_flattened.reshape(1, -1, 1).astype(np.float32)
 
         # 3️⃣ Build all possible non-empty subsets of servers (0-based indexing)
         subsets = get_subsets(set(range(self.beta)))
@@ -227,8 +229,9 @@ class DQNAgent:
 
         else:
             self.exploit_or_explore = np.append(self.exploit_or_explore, "exploit")
-            
-            action_vals = self.timed_predict(encoded_state)
+
+            # Model will automatically encode the raw state internally
+            action_vals = self.timed_predict(state_tensor)
 
             # Convert to NumPy for argmax
             action = np.argmax(action_vals.numpy()[0])
@@ -243,91 +246,89 @@ class DQNAgent:
         return return_arr, action
 
 
-    #TODO:
-    # Need to adapt this method to work with the encoded states.
-    # Since we are using request objects, 
-    # How to modify the state and next_state parameters here ?
     def experience_replay(self, batch_size):
-        minibatch = random.sample( self.memory, batch_size ) #Randomly sample from memory
-        states, actions, rewards, next_states = map(np.array, zip(*minibatch))
-        states = np.array(states)
-        current_q = self.model.predict(states, verbose =0)
+        """
+        Sample from memory and train the integrated model.
+        States are stored RAW, so model encodes them during forward pass.
+        Gradients flow through encoder layers during backpropagation.
+        """
+        minibatch = random.sample(self.memory, batch_size)
+        states, actions, rewards, next_states = map(list, zip(*minibatch))
 
-        next_q_values = self.model.predict(next_states,verbose =0)
+        # Pad states to same length for batching
+        # Each state is (variable_length, 1), we need to make them uniform length
+        states_padded = tf.keras.preprocessing.sequence.pad_sequences(
+            [s.flatten() for s in states],
+            padding='post',
+            dtype='float32',
+            value=-1.0
+        )
+        next_states_padded = tf.keras.preprocessing.sequence.pad_sequences(
+            [s.flatten() for s in next_states],
+            padding='post',
+            dtype='float32',
+            value=-1.0
+        )
 
+        # Reshape to (batch, max_length, 1) for model input
+        states_padded = states_padded.reshape(batch_size, -1, 1)
+        next_states_padded = next_states_padded.reshape(batch_size, -1, 1)
+
+        # Forward pass (model encodes internally)
+        current_q = self.model.predict(states_padded, verbose=0)
+        next_q_values = self.model.predict(next_states_padded, verbose=0)
+
+        # Compute targets using Bellman equation
         targets = current_q.copy()
-        targets[np.arange(batch_size), actions] = (rewards) + self.reward_gamma * np.amax(next_q_values, axis=1) 
+        targets[np.arange(batch_size), actions] = rewards + self.reward_gamma * np.amax(next_q_values, axis=1)
 
+        # Train (gradients flow through encoder!)
+        hist = self.model.fit(states_padded, targets, epochs=self.epochs, verbose=0, validation_split=0.2)
 
-        hist = self.model.fit(states, targets, epochs=self.epochs, verbose=0 , validation_split=0.2)
-
+        # Decay epsilon
         if self.epsilon > self.epsilon_min:
             self.epsilon -= self.epsilon_decay
 
-        loss_sum = hist.history['loss'][0]
-        val_loss_sum = hist.history['val_loss'][0]
-        
+        self.loss = np.append(self.loss, hist.history['loss'][0])
+        self.val_loss = np.append(self.val_loss, hist.history['val_loss'][0])
 
-        self.loss.append(loss_sum)
-        self.val_loss.append(val_loss_sum)
-    
-    
-    
-    #TODO: 
+
+
+    #TODO:
     # @Shrutya :  verify usage of .compute_request_time() instead of the .get_delay() method.
     def get_min_delay(self, request, servers_to_be_queried):
         """
         Query the servers and get the minimum delay among them.
         """
         min_delay = float('inf')
-        
+
         for server in servers_to_be_queried:
             min_delay = min(min_delay, self.server_list[server].compute_request_time(request))
         return min_delay
 
 
-    #TODO: 
+    #TODO:
     # @Shrutya :  verify usage of .compute_request_time() instead of the .get_delay() method.
-    # 
-    # 
-    # @Medha :  Review this reward function again. 
-    # Need to replace with new reward function.
+    #
+    # NOTE: This method is NO LONGER USED with step/episodic reward architecture.
+    # Kept for backward compatibility. Rewards are now computed in controller.py
     def reward(self, action, request):
         """
-        Used to compute min latency among chosen servers.
+        DEPRECATED: Used to compute min latency among chosen servers.
+
+        With the new step/episodic reward architecture:
+        - Step rewards are computed in controller.compute_step_reward()
+        - Episodic rewards are computed in controller.compute_episodic_reward()
+        - Training happens once per episode in controller.finalize_episode()
         """
         MEDIAN_LATENCY = self.median_computation_delay
 
         servers_to_be_queried = action
         obs_latency = self.get_min_delay(request, servers_to_be_queried)
 
-        # same reward structure as before
-        if abs(obs_latency - MEDIAN_LATENCY) < 1000:
-            lamda = (obs_latency - MEDIAN_LATENCY)
-            reward = 0
-            delta = 0
-            gamma = len(action)-1 
+        # Log latency metrics (still useful for analysis)
+        self.latencies = np.append(self.latencies, obs_latency)
+        self.deviations = np.append(self.deviations, abs(obs_latency - MEDIAN_LATENCY))
 
-            if lamda < 0:
-                delta = (self.alpha * np.exp(-1 * lamda))
-            else:
-                delta = (self.alpha * np.exp(lamda))
-            
-            if lamda == 0:
-                reward = 0
-            elif lamda > 0 and self.beta - gamma == 1:
-                reward = 0
-            elif lamda > 0 and self.beta - gamma > 1 :
-                reward = (-1 * np.exp(self.beta - gamma - 1) * delta)
-            elif lamda < 0:
-                reward = (-1 * np.exp(gamma) * delta)
-
-            self.latencies = np.append(self.latencies, obs_latency)
-            self.deviations = np.append(self.deviations, abs(obs_latency - MEDIAN_LATENCY))
-            self.rewards = np.append(self.rewards, reward)    
-
-            if len(self.memory) > self.batch_size:
-                print("[AGENT] Performing experience replay...")
-                self.experience_replay(self.batch_size)
-
-            return reward
+        # Return observed latency (not used for training anymore)
+        return obs_latency

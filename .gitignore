@@ -212,6 +212,8 @@ models/regressor_model.pkl
 # Folders
 received_chunks/
 old_code/
+training_logs/
 
 # Files
 safetail_new_architecture.pdf
+STEP_EPISODIC_ARCHITECTURE.md
