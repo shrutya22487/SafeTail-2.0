@@ -133,12 +133,20 @@ class PredictPredictor:
     def predict_from_combination(self, combination: str) -> float:
         row = self._find_row_by_combination(combination)
         X = self._build_features_from_row(row)
+        
         if self.scaler is not None:
+            # Linear models need scaling - returns numpy array
             X_ready = self.scaler.transform(X.astype(float))
-        else:
-            X_ready = X.astype(float).values
-        try:
             pred_arr = self.model.predict(X_ready)
+        else:
+            # Tree-based models: keep as DataFrame with feature names
+            X_numeric = X.astype(float)
+            # Ensure it's still a DataFrame with proper columns
+            if not isinstance(X_numeric, pd.DataFrame):
+                X_numeric = pd.DataFrame(X_numeric, columns=self.feature_columns)
+            pred_arr = self.model.predict(X_numeric)
+        
+        try:
             return float(np.asarray(pred_arr).ravel()[0])
         except Exception as e:
             raise RuntimeError(f"Model prediction failed: {e}")
