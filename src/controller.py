@@ -91,6 +91,7 @@ class Controller:
         Returns:
             step_reward: Scalar reward value for this step
         """
+        # Step reward computation, needs to be updated.
         queue_lengths = self.get_queue_lengths()
         total_load = np.sum(queue_lengths)
         avg_load = total_load / self.num_servers
@@ -187,6 +188,28 @@ class Controller:
             self.agent.epsilon_curve = np.append(self.agent.epsilon_curve, self.agent.epsilon)
 
         # Compute step reward (aggregate across all requests in chunk)
+        # but since we are aggragating over multiple requests, we take unique servers used
+        
+        # how do we calculate 
+        # Reward function:
+        # R = 1 + log( e^((1 - cm)(1 - cu)(1 - gm)(1 - gu)) - 1 )
+
+        # Where:
+        # cm = RAM utilization
+        #      = RAM_used / Total_RAM_available
+        #
+        # cu = CPU core utilization
+        #      = Total_core_utilization_% / (Number_of_cores * 100)
+        #
+        # gm = GPU memory utilization
+        #      = GPU_memory_used / Total_GPU_memory_available
+        #
+        # gu = GPU core utilization
+        #      = GPU_core_utilization
+        
+        # Because the reward will have to be calculated on the basis of multiple requests,
+        # will we take the average of the utilizations across all requests in the chunk?
+
         all_selected_servers = np.unique(np.concatenate(step_actions))
         avg_waiting_time = np.mean(step_waiting_times) if step_waiting_times else 0
 

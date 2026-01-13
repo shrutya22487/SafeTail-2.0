@@ -42,6 +42,7 @@ def request_factory(i: int):
             gpu_clock=None,
             time_util=None,
         )
+        
     except Exception:
         # final fallback: try positional
         try:
@@ -64,11 +65,11 @@ def main():
     # ---------------- create sender ----------------
     sender = SenderBursts(
         arr=None,               # auto-generate using request_factory
-        sample_count=5,        # total requests
+        sample_count=15,        # total requests
         chunk_size=5,          # requests per chunk
-        bursts=1,
+        bursts=3,
         min_burst=1,
-        max_burst=1,
+        max_burst=2,
         min_interval=0.2,
         max_interval=0.8,
         jitter=0.02,
