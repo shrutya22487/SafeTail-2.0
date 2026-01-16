@@ -11,22 +11,25 @@ import constants
 from agent import DQNAgent
 
 class Controller:
-    def __init__(self, num_servers=5, steps_per_episode=10):
+    def __init__(self, num_servers=5, steps_per_episode=10, chunks_per_episode=3):
 
         self.num_servers = num_servers
         self.server_list = [servers.Server(i + 1) for i in range(num_servers)]
-        self.queue = deque(maxlen=50)
-        self.lock = threading.Lock()
-        self.receiver_queue = None  # to be attached later
 
-        # Episode/Step tracking
-        self.steps_per_episode = steps_per_episode
+        self.lock = threading.Lock()
+        self.receiver_queue = None  # attached externally
+
+        # ---------------- Episode / Step tracking ----------------
+        self.chunks_per_episode = chunks_per_episode
+        self.steps_per_episode = steps_per_episode # Use if required.
+        self.current_chunk = 0
         self.current_step = 0
         self.current_episode = 0
-        self.step_experiences = []  # Store experiences for current step
-        self.episode_step_rewards = []  # Store step rewards for current episode
-        self.episode_waiting_times = []  # Track waiting times across episode
 
+        self.step_experiences = []
+        self.step_rewards = []
+
+        # ---------------- Agent ----------------
         self.agent = DQNAgent(
             states=constants.nS,
             actions=constants.nA,
@@ -44,7 +47,10 @@ class Controller:
             server_list=self.server_list,
             request=None
         )
-
+    
+    # ------------------------------------------------------------
+    # Utility
+    # ------------------------------------------------------------
     def find_free_servers(self):
         now = time.time()
         load = [s.check_server_availability(now) for s in self.server_list]
@@ -77,34 +83,40 @@ class Controller:
                 print(f"[CONTROLLER, ERROR:2] Unexpected error for Req {request.request_id} on server {i}: {e}")
 
         print("\n---- ---- ---- \n")
-
-
-    def compute_step_reward(self, selected_servers, waiting_time):
+        
+    # ------------------------------------------------------------
+    # Reward
+    # ------------------------------------------------------------
+    def compute_step_reward(self, request):
         """
-        Compute step reward as per new architecture:
-        R_step = Σ(li - l_total/m) - W_step
+        Step reward computed PER REQUEST:
+        
+        Reward function:
+        R = 1 + log( e^((1 - cm)(1 - cu)(1 - gm)(1 - gu)) - 1 )
 
-        Args:
-            selected_servers: List of server indices used in this step
-            waiting_time: Minimum waiting time observed in this step
-
-        Returns:
-            step_reward: Scalar reward value for this step
+        Where:
+        cm = RAM utilization = RAM_used / Total_RAM_available
+        cu = CPU core utilization = Total_core_utilization_% / (Number_of_cores * 100)
+        gm = GPU memory utilization = GPU_memory_used / Total_GPU_memory_available
+        gu = GPU core utilization = GPU_core_utilization
         """
-        # Step reward computation, needs to be updated.
-        queue_lengths = self.get_queue_lengths()
-        total_load = np.sum(queue_lengths)
-        avg_load = total_load / self.num_servers
+        # cm = request.cm
+        # cu = request.cu
+        # gm = request.gm
+        # gu = request.gu
 
-        # Load balancing term: sum of (queue_length - average_load) for selected servers
-        load_balance_term = sum(queue_lengths[i] - avg_load for i in selected_servers)
+        # core = (1 - cm) * (1 - cu) * (1 - gm) * (1 - gu)
 
-        # Step reward = load balance - waiting time
-        step_reward = load_balance_term - waiting_time
+        # # numerical stability
+        # reward = 1.0 + np.log(np.exp(core) - 1.0 + 1e-8)
 
-        print(f"[CONTROLLER, STEP REWARD] Load balance: {load_balance_term:.3f}, Wait: {waiting_time:.3f}, R_step: {step_reward:.3f}")
+        # print(
+        #     f"[STEP REWARD] cm={cm:.3f}, cu={cu:.3f}, gm={gm:.3f}, gu={gu:.3f} → R={reward:.4f}"
+        # )
+        
+        reward = 0.6  # Placeholder for actual reward calculation
 
-        return step_reward
+        return reward
 
 
     def compute_episodic_reward(self):
@@ -122,7 +134,7 @@ class Controller:
 
         # Discounted sum of step rewards
         discounted_step_rewards = sum(
-            (gamma ** i) * r for i, r in enumerate(self.episode_step_rewards)
+            (gamma ** i) * r for i, r in enumerate(self.step_rewards)
         )
 
         # Degree of satisfaction (simplified: percentage of successful assignments)
@@ -130,7 +142,7 @@ class Controller:
         omega = 1.0  # Placeholder: assume all requests satisfied
 
         # Average waiting time across the episode
-        avg_waiting_time = np.mean(self.episode_waiting_times) if self.episode_waiting_times else 0
+        avg_waiting_time = 0 # Placeholder: implement actual waiting time calculation
 
         # Episodic reward
         episodic_reward = discounted_step_rewards + omega - avg_waiting_time
@@ -142,86 +154,53 @@ class Controller:
         return episodic_reward
 
 
-    def process_step(self, chunk):
+    def process_step(self, request):
         """
-        Process one step (one chunk of requests).
+        Process one step (ONE STEP = processing ONE request).
         Collects experiences but doesn't train yet.
         """
-        print(f"\n[CONTROLLER, STEP {self.current_step}] Processing chunk with {len(chunk)} requests.")
-
-        step_actions = []
-        step_waiting_times = []
-
-        for req in chunk:
-            # Get current server load
-            load = self.find_free_servers()
-
-            num_free = sum(l != 1e9 for l in load)
-            if num_free == 0:
-                print("[CONTROLLER, QUEUE] All servers busy. Retrying shortly.")
-                time.sleep(0.1)
-                continue
-
-            # Update request with current state
-            req.load = np.array(load)
-            req.total_delay = [self.server_list[i].compute_request_time(req) for i in range(self.num_servers)]
-
-            # Get action from agent
-            action_subset, action_index = self.agent.get_action(req)
-            step_actions.append(action_subset)
-
-            # Execute action
-            self.assign_request(req, action_subset)
-
-            # Compute waiting time for this request (using minimum latency among selected servers)
-            min_waiting_time = min(self.server_list[i].compute_request_time(req) for i in action_subset)
-            step_waiting_times.append(min_waiting_time)
-
-            # Store experience (will be added to replay buffer after episode)
-            self.step_experiences.append({
-                'state': req,
-                'action': action_index,
-                'next_state': req  # TODO: Implement proper next state tracking
-            })
-
-            # Log epsilon
-            self.agent.epsilon_curve = np.append(self.agent.epsilon_curve, self.agent.epsilon)
-
-        # Compute step reward (aggregate across all requests in chunk)
-        # but since we are aggragating over multiple requests, we take unique servers used
+        print(f"\n[CONTROLLER, STEP {self.current_step}] Processing request {request.request_id}.")
         
-        # how do we calculate 
-        # Reward function:
-        # R = 1 + log( e^((1 - cm)(1 - cu)(1 - gm)(1 - gu)) - 1 )
-
-        # Where:
-        # cm = RAM utilization
-        #      = RAM_used / Total_RAM_available
-        #
-        # cu = CPU core utilization
-        #      = Total_core_utilization_% / (Number_of_cores * 100)
-        #
-        # gm = GPU memory utilization
-        #      = GPU_memory_used / Total_GPU_memory_available
-        #
-        # gu = GPU core utilization
-        #      = GPU_core_utilization
+        load = self.find_free_servers()
+        num_free = sum(l != 1e9 for l in load)
         
-        # Because the reward will have to be calculated on the basis of multiple requests,
-        # will we take the average of the utilizations across all requests in the chunk?
+        if num_free == 0:
+            print("[CONTROLLER, QUEUE] All servers busy. Retrying shortly.")
+            time.sleep(0.1)
+            return
 
-        all_selected_servers = np.unique(np.concatenate(step_actions))
-        avg_waiting_time = np.mean(step_waiting_times) if step_waiting_times else 0
-
-        step_reward = self.compute_step_reward(all_selected_servers, avg_waiting_time)
-
-        # Store step-level metrics
-        self.episode_step_rewards.append(step_reward)
-        self.episode_waiting_times.extend(step_waiting_times)
-
+        # update request state
+        request.load = load
+        request.total_delay = [
+            self.server_list[i].compute_request_time(request)
+            for i in range(self.num_servers)
+        ]
+        
+        # agent action
+        action_subset, action_index = self.agent.get_action(request)
+        
+        # assign request
+        for i in action_subset:
+            self.server_list[i].schedule_request(request)
+        
+        # compute reward
+        step_reward = self.compute_step_reward(request)
+        
         print(f"[CONTROLLER, STEP {self.current_step}] Completed. Step reward: {step_reward:.3f}")
-
-        return step_reward
+        
+        # store experience
+        self.step_experiences.append({
+            "state": request,
+            "action": action_index,
+            # "reward": step_reward,
+            "next_state": request  # environment is partially observable anyway
+        })
+        
+        self.step_rewards.append(step_reward)
+        self.agent.epsilon_curve = np.append(
+            self.agent.epsilon_curve, self.agent.epsilon
+        )
+        self.current_step += 1
 
 
     def finalize_episode(self):
@@ -236,6 +215,12 @@ class Controller:
 
         # Compute episodic reward
         episodic_reward = self.compute_episodic_reward()
+        
+        print(
+            f"[EPISODE {self.current_episode}] "
+            f"Steps={len(self.step_rewards)}, "
+            f"Reward={episodic_reward:.4f}"
+        )
 
         # Store all experiences from this episode with episodic reward
         for exp in self.step_experiences:
@@ -254,19 +239,19 @@ class Controller:
 
         # Log episode metrics
         print(f"[CONTROLLER, EPISODE {self.current_episode}] "
-              f"Steps: {len(self.episode_step_rewards)}, "
               f"Experiences: {len(self.step_experiences)}, "
               f"Episodic Reward: {episodic_reward:.3f}, "
               f"Epsilon: {self.agent.epsilon:.6f}")
 
         # Checkpoint every N episodes
-        if self.current_episode % 10 == 0:
-            self.save_checkpoint()
+        # if self.current_episode % 10 == 0:
+        #     self.save_checkpoint()
 
         # Reset episode-level tracking
         self.step_experiences = []
-        self.episode_step_rewards = []
+        self.step_rewards = []
         self.episode_waiting_times = []
+        self.current_chunk = 0
         self.current_step = 0
         self.current_episode += 1
 
@@ -303,24 +288,24 @@ class Controller:
         Main control loop implementing step/episodic training.
 
         Architecture:
-        - STEP = processing one chunk of requests
-        - EPISODE = processing k steps (k chunks)
+        - STEP = processing one of the requests in a chunk
+        - EPISODE = processing 3 chunks (chunk = list of requests)
         - Training happens ONCE per episode
         """
         print("[CONTROLLER] Starting main control loop with step/episodic rewards.")
-
-        while True:
+        print(
+            f"[CONTROLLER] Processing chunk {self.current_chunk + 1}/"
+            f"{self.chunks_per_episode}"
+        )
+        for request in chunk:
             with self.lock:
-                arr = chunk
-
-            # Process this chunk as one STEP
-            self.process_step(arr)
-            self.current_step += 1
-
-            # Check if episode is complete
-            if self.current_step >= self.steps_per_episode:
-                self.finalize_episode()
-
+                # Process this chunk as one STEP
+                self.process_step(request)
+        self.current_chunk += 1
+        
+        # Check if episode is complete
+        if self.current_chunk >= self.chunks_per_episode:
+            self.finalize_episode()
 
     def run(self):
         # ---------------- start receiver ----------------
