@@ -14,43 +14,120 @@ from sender_bursts import SenderBursts
 import user
 from controller import Controller
 import constants
+import os
+import random
+import pandas as pd
+from pathlib import Path
+
+# ---- load server CSVs once (NOT per request) ----
+BASE_DIR = Path(__file__).resolve().parent.parent  # go from src/ -> project root
+DATA_DIR = BASE_DIR / "data"
+
+SERVER_CSVS = [
+    DATA_DIR / "server1.csv",
+    DATA_DIR / "server2.csv",
+    DATA_DIR / "server3.csv",
+    DATA_DIR / "server4.csv",
+    DATA_DIR / "server5.csv",
+]
+
+SERVER_DFS = []
+for p in SERVER_CSVS:
+    if not p.exists():
+        raise FileNotFoundError(f"Missing CSV: {p}")
+    SERVER_DFS.append(pd.read_csv(p))
 
 # --- request factory that uses the actual Request signature ---
 def request_factory(i: int):
-    """
-    Construct a user.Request with required args (request_id, process_id)
-    and a couple of safe optional values.
-    """
-    # minimal required args: request_id, process_id
-    # other optional fields we set to sane defaults so Receiver sees request_id
+    import random
+    import numpy as np
+    import time
+    from types import SimpleNamespace
+
     try:
+        # ---------------- combination ----------------
+        combination = random.choice(["s", "p", "d"])
+
+        duration = []
+        proc_time = []
+        ram = []
+        cpu = []
+
+        extras = {
+            "scripts_executed": [],
+            "individual_script_time": []
+        }
+
+        for df in SERVER_DFS:
+            row = df[df["Combination"] == combination]
+
+            if row.empty:
+                raise ValueError(f"No row for combination '{combination}'")
+
+            row = row.iloc[0]
+
+            duration.append(float(row["Total Execution Time (sec)"]))
+            proc_time.append(float(row["Total Processing Time (sec)"]))
+
+            ram.append(float(row.get("RAM Usage (MB)", 0.0)))
+            cpu.append(float(row.get("CPU Usage (%)", 0.0)))
+
+            extras["scripts_executed"].append(row.get("Scripts Executed"))
+            extras["individual_script_time"].append(
+                float(row.get("Individual Script Time (sec)", 0.0))
+            )
+
+        time_util = np.column_stack([proc_time, duration])
+
         return user.Request(
-            request_id=int(i),
-            process_id=int(i),
-            message_size=0.0,
-            bandwidth=0.0,
-            load=None,
-            ram_usage=0.0,
-            cpu_usage=None,
-            arrival_time=0.0,
-            duration=0.0,
-            extras=None,
+            request_id=i,
+            process_id=i,
+            combination=combination,
+
+            message_size=np.zeros(len(SERVER_DFS)),
+            bandwidth=np.zeros(len(SERVER_DFS)),
+            load=np.zeros(len(SERVER_DFS), dtype=int),
+            ram_usage=ram,
+            cpu_usage=cpu,
+
+            arrival_time=time.time() * 1000.0,  # ms
+            duration=duration,
+            time_util=time_util,
+
             gpu_usage=None,
             cpu_model=None,
             gpu_model=None,
             cpu_clock=None,
             gpu_clock=None,
-            time_util=None,
+
+            extras=extras,
         )
-        
-    except Exception:
-        # final fallback: try positional
+
+    except Exception as e:
+        # -------- fallback 1: minimal Request --------
         try:
-            return user.Request(int(i), int(i))
+            return user.Request(
+                request_id=int(i),
+                process_id=int(i),
+                combination="s",
+                message_size=np.zeros(len(SERVER_DFS)),
+                bandwidth=np.zeros(len(SERVER_DFS)),
+                load=np.zeros(len(SERVER_DFS), dtype=int),
+                ram_usage=np.zeros(len(SERVER_DFS)),
+                cpu_usage=np.zeros(len(SERVER_DFS)),
+                arrival_time=time.time() * 1000.0,
+                duration=np.zeros(len(SERVER_DFS)),
+                time_util=np.zeros((len(SERVER_DFS), 2)),
+                extras={},
+            )
         except Exception:
-            # ultimate fallback: a simple object with request_id attribute
-            ns = SimpleNamespace(request_id=int(i), process_id=int(i))
-            return ns
+            # -------- fallback 2: bare minimum --------
+            return SimpleNamespace(
+                request_id=int(i),
+                process_id=int(i),
+                combination="s",
+                arrival_time=time.time() * 1000.0,
+            )
 
 
 def main():
