@@ -18,6 +18,7 @@ import os
 import random
 import pandas as pd
 from pathlib import Path
+import numpy as np
 
 # ---- load server CSVs once (NOT per request) ----
 BASE_DIR = Path(__file__).resolve().parent.parent  # go from src/ -> project root
@@ -38,12 +39,8 @@ for p in SERVER_CSVS:
     SERVER_DFS.append(pd.read_csv(p))
 
 # --- request factory that uses the actual Request signature ---
-def request_factory(i: int):
-    import random
-    import numpy as np
-    import time
-    from types import SimpleNamespace
-
+def request_factory(i: int): 
+    
     try:
         # ---------------- combination ----------------
         combination = random.choice(["s", "p", "d"])
@@ -80,17 +77,37 @@ def request_factory(i: int):
         time_util = np.column_stack([proc_time, duration])
 
         return user.Request(
+            
+            # @shivankar: pl complete
+            # Keep these...
             request_id=i,
             process_id=i,
             combination=combination,
-
             message_size=np.zeros(len(SERVER_DFS)),
             bandwidth=np.zeros(len(SERVER_DFS)),
             load=np.zeros(len(SERVER_DFS), dtype=int),
+            arrival_time=time.time() * 1000.0,  # ms
+            # ######################################
+            
+            # server1_dict = : 
+            # server2_dict = : 
+            # server3_dict = : 
+            # server4_dict = : 
+            # server5_dict = :
+
+            # server1 _ Np =: {}
+            # server2 _ Np =: {}
+            # server3 _ Np =: {}
+            # server4 _ Np =: {}
+            # server5 _ Np =: {}
+            
+            # ##########################
+
+            
             ram_usage=ram,
             cpu_usage=cpu,
 
-            arrival_time=time.time() * 1000.0,  # ms
+            
             duration=duration,
             time_util=time_util,
 

@@ -176,6 +176,8 @@ class Controller:
             for i in range(self.num_servers)
         ]
         
+        # Update request state to add data from servers @Shamik
+        
         # agent action
         action_subset, action_index = self.agent.get_action(request)
         
