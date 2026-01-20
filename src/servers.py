@@ -28,7 +28,7 @@ class Server:
             self.propagation_delays = pickle.load(f)
 
         # Load server data path
-        self.server_data_path = base_dir.parent / "data" / f"server1.csv"
+        self.server_data_path = base_dir.parent / "data" / f"server{server_index}.csv"
         if not self.server_data_path.exists():
             raise FileNotFoundError(f"Server data CSV not found: {self.server_data_path}")
 
@@ -45,7 +45,7 @@ class Server:
 
     def _load_predictors_from_regressor_folder(self, base_dir: Path, server_index: int):
         self.predictors = {'d': None, 's': None, 'p': None}
-        reg_folder = base_dir / f"server1_regressor"
+        reg_folder = base_dir / f"server{self.server_index}_regressor"
         if not reg_folder.exists() or not reg_folder.is_dir():
             return
 
