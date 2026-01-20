@@ -4,10 +4,6 @@ from pathlib import Path
 
 
 class SpeechPredictor:
-    """
-    Predicts Speech processing time using a Linear Regression model.
-    """
-
     def __init__(self):
         base_dir = Path(__file__).resolve().parent
 
@@ -27,26 +23,29 @@ class SpeechPredictor:
     def _find_row(self, combination: str) -> pd.Series:
         mask = self.df["Combination"].str.lower() == combination.lower()
         if not mask.any():
-            raise ValueError(f"No row found for combination '{combination}'")
+            raise ValueError(f"No row found for '{combination}'")
         return self.df.loc[mask].iloc[0]
 
     def _build_features(self, row: pd.Series) -> pd.DataFrame:
         combination = row["Combination"].lower()
         scripts = [s.strip().lower() for s in row["Scripts Executed"].split(",")]
-        speech_idx = scripts.index("speech")
+        idx = scripts.index("speech")
 
         features = {
-            "num_speech": combination.count("s"),
-            "num_detect": combination.count("d"),
-            "num_predict": combination.count("p"),
-            "total_ops": len(combination),
-            "position": speech_idx,
-            "is_first": int(speech_idx == 0),
-            "is_last": int(speech_idx == len(scripts) - 1),
+            "num_tasks": len(scripts),
+            "position": idx + 1,
+            "total_combination_length": len(combination),
+            "has_detect": int("d" in combination),
+            "has_predict": int("p" in combination),
+            "is_first": int(idx == 0),
+            "is_last": int(idx == len(scripts) - 1),
+            "num_speech_tasks": combination.count("s"),
+            "num_detect_tasks": combination.count("d"),
+            "num_predict_tasks": combination.count("p"),
             "peak_ram": row["Peak RAM Usage (MB)"],
-            "peak_gpu": row["Peak GPU Usage (%)"],
-            "peak_gpu_memory": row["Peak GPU Memory (MB)"],
-            "total_processing_time": row["Total Processing Time (sec)"],
+            "peak_cpu": row["Peak CPU Usage (%)"],
+            "avg_cpu_clock": row["Average CPU Clock (MHz)"],
+            "num_files": 54,
         }
 
         return pd.DataFrame([[features[c] for c in self.feature_columns]],
@@ -55,6 +54,5 @@ class SpeechPredictor:
     def predict_from_combination(self, combination: str) -> float:
         row = self._find_row(combination)
         X = self._build_features(row)
-
         X_scaled = self.scaler.transform(X.astype(float))
         return float(self.model.predict(X_scaled)[0])
