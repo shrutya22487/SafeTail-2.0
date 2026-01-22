@@ -19,6 +19,11 @@ import random
 import pandas as pd
 from pathlib import Path
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 
 # ---- load server CSVs once (NOT per request) ----
 BASE_DIR = Path(__file__).resolve().parent.parent  # go from src/ -> project root
@@ -39,113 +44,89 @@ for p in SERVER_CSVS:
     SERVER_DFS.append(pd.read_csv(p))
 
 # --- request factory that uses the actual Request signature ---
-def request_factory(i: int): 
-    
+def request_factory(i: int):
+    """
+    Pure Request factory.
+
+    Responsibilities:
+    - create Request object
+    - set ids, combination, arrival time
+    - initialize base arrays ONLY
+
+    Non-responsibilities:
+    - NO server CSV access
+    - NO filling server dicts
+    - NO filling server NP arrays
+    - NO computation
+
+    This function MUST NOT crash the sender.
+    """
+
+    # -------- safest defaults --------
+    server_count = 5
+
     try:
         # ---------------- combination ----------------
-        combination = random.choice(["s", "p", "d"])
+        try:
+            combination = random.choice(["s", "p", "d"])
+        except Exception:
+            # absolute fallback
+            combination = "s"
 
-        duration = []
-        proc_time = []
-        ram = []
-        cpu = []
-
-        extras = {
-            "scripts_executed": [],
-            "individual_script_time": []
-        }
-
-        for df in SERVER_DFS:
-            row = df[df["Combination"] == combination]
-
-            if row.empty:
-                raise ValueError(f"No row for combination '{combination}'")
-
-            row = row.iloc[0]
-
-            duration.append(float(row["Total Execution Time (sec)"]))
-            proc_time.append(float(row["Total Processing Time (sec)"]))
-
-            ram.append(float(row.get("RAM Usage (MB)", 0.0)))
-            cpu.append(float(row.get("CPU Usage (%)", 0.0)))
-
-            extras["scripts_executed"].append(row.get("Scripts Executed"))
-            extras["individual_script_time"].append(
-                float(row.get("Individual Script Time (sec)", 0.0))
-            )
-
-        time_util = np.column_stack([proc_time, duration])
-
-        return user.Request(
-            
-            # @shivankar: pl complete
-            # Keep these...
-            request_id=i,
-            process_id=i,
+        # ---------------- construct request ----------------
+        req = user.Request(
+            request_id=int(i),
+            process_id=int(i),
             combination=combination,
-            message_size=np.zeros(len(SERVER_DFS)),
-            bandwidth=np.zeros(len(SERVER_DFS)),
-            load=np.zeros(len(SERVER_DFS), dtype=int),
-            arrival_time=time.time() * 1000.0,  # ms
-            # ######################################
-            
-            # server1_dict = : 
-            # server2_dict = : 
-            # server3_dict = : 
-            # server4_dict = : 
-            # server5_dict = :
 
-            # server1 _ Np =: {}
-            # server2 _ Np =: {}
-            # server3 _ Np =: {}
-            # server4 _ Np =: {}
-            # server5 _ Np =: {}
-            
-            # ##########################
-
-            
-            ram_usage=ram,
-            cpu_usage=cpu,
-
-            
-            duration=duration,
-            time_util=time_util,
-
-            gpu_usage=None,
-            cpu_model=None,
-            gpu_model=None,
-            cpu_clock=None,
-            gpu_clock=None,
-
-            extras=extras,
+            message_size=np.zeros(server_count, dtype=float),
+            bandwidth=np.zeros(server_count, dtype=float),
+            load=np.zeros(server_count, dtype=int),
         )
 
+        return req
+
     except Exception as e:
-        # -------- fallback 1: minimal Request --------
+        # ==================================================
+        # HARD FAILURE: Request constructor failed
+        # ==================================================
+        try:
+            logger.error(
+                "[request_factory] Failed to construct Request. "
+                f"i={i}, error={e}",
+                exc_info=True
+            )
+        except Exception:
+            pass  # logging must never break execution
+
+        # ==================================================
+        # FALLBACK 1: minimal valid Request
+        # ==================================================
         try:
             return user.Request(
                 request_id=int(i),
                 process_id=int(i),
                 combination="s",
-                message_size=np.zeros(len(SERVER_DFS)),
-                bandwidth=np.zeros(len(SERVER_DFS)),
-                load=np.zeros(len(SERVER_DFS), dtype=int),
-                ram_usage=np.zeros(len(SERVER_DFS)),
-                cpu_usage=np.zeros(len(SERVER_DFS)),
-                arrival_time=time.time() * 1000.0,
-                duration=np.zeros(len(SERVER_DFS)),
-                time_util=np.zeros((len(SERVER_DFS), 2)),
-                extras={},
+                message_size=np.zeros(server_count, dtype=float),
+                bandwidth=np.zeros(server_count, dtype=float),
+                load=np.zeros(server_count, dtype=int),
             )
         except Exception:
-            # -------- fallback 2: bare minimum --------
-            return SimpleNamespace(
-                request_id=int(i),
-                process_id=int(i),
-                combination="s",
-                arrival_time=time.time() * 1000.0,
-            )
-
+            # ==================================================
+            # FALLBACK 2: bare minimum namespace (last resort)
+            # ==================================================
+            try:
+                return SimpleNamespace(
+                    request_id=int(i),
+                    process_id=int(i),
+                    combination="s",
+                    arrival_time=time.time() * 1000.0,
+                )
+            except Exception:
+                # ==================================================
+                # FALLBACK 3: absolute last resort
+                # ==================================================
+                return None
 
 def main():
     # --------------- setup controller ---------------
