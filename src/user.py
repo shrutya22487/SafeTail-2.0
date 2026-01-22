@@ -4,38 +4,18 @@ import numpy as np
 
 class Request:
     """
-    Request represents ONE logical request evaluated across MULTIPLE servers.
+    Pickle-safe Request object.
 
-    DESIGN PHILOSOPHY
-    -----------------
-    This object intentionally separates DATA INTO TWO FORMS:
-
-    1. server*_dict  → STRUCTURE / MEANING
-       - Named fields (ram_usage, cpu_usage, etc.)
-       - Easy to debug, log, reason about
-       - Flexible: fields can change without breaking code
-
-    2. server*_NP    → COMPUTATION
-       - One flat NumPy array of numbers only
-       - No headers, no structure, no metadata
-       - Optimized for schedulers, math, ML, cost functions
-
-    This separation avoids a common mistake:
-    mixing "meaning" and "math" into the same container.
-
-    
+    Dicts = structure / meaning
+    NP arrays = computation
     """
 
-    # ==================================================
-    # CONSTRUCTOR
-    # ==================================================
     def __init__(
         self,
         request_id: int,
         process_id: int,
         combination: str,
 
-        # Base per-request arrays (already fixed by you)
         message_size: np.ndarray,
         bandwidth: np.ndarray,
         load: np.ndarray,
@@ -45,54 +25,24 @@ class Request:
         self.process_id: int = int(process_id)
         self.combination: str = combination
 
-        # -------- base arrays (server-aligned) --------
-        self.message_size: np.ndarray = np.asarray(message_size, dtype=float)
-        self.bandwidth: np.ndarray = np.asarray(bandwidth, dtype=float)
-        self.load: np.ndarray = np.asarray(load, dtype=int)
+        # -------- base arrays --------
+        self.message_size = np.asarray(message_size, dtype=float)
+        self.bandwidth = np.asarray(bandwidth, dtype=float)
+        self.load = np.asarray(load, dtype=int)
 
-        # ==================================================
-        # SERVER STRUCTURE (DICT FORM)
-        # ==================================================
-        # These store NAMED fields.
-        # Used for debugging, logging, inspection, validation.
-        self.server1_dict: Dict[str, Any] = {}
-        self.server2_dict: Dict[str, Any] = {}
-        self.server3_dict: Dict[str, Any] = {}
-        self.server4_dict: Dict[str, Any] = {}
-        self.server5_dict: Dict[str, Any] = {}
-
-        # Internal indexed access (avoids if/else chains)
-        self._server_dicts = [
-            self.server1_dict,
-            self.server2_dict,
-            self.server3_dict,
-            self.server4_dict,
-            self.server5_dict,
+        # -------- server dicts (structure) --------
+        self.server_dicts: list[Dict[str, Any]] = [
+            {}, {}, {}, {}, {}
         ]
 
-        # ==================================================
-        # SERVER COMPUTATION (NUMPY FORM)
-        # ==================================================
-        # These store ONLY numbers.
-        # No headers, no structure.
-        # Used ONLY for math / scheduling / ML.
-        self.server1_NP: Optional[np.ndarray] = None
-        self.server2_NP: Optional[np.ndarray] = None
-        self.server3_NP: Optional[np.ndarray] = None
-        self.server4_NP: Optional[np.ndarray] = None
-        self.server5_NP: Optional[np.ndarray] = None
-
-        # Setter indirection to keep code simple and explicit
-        self._server_np_setters = [
-            lambda v: setattr(self, "server1_NP", v),
-            lambda v: setattr(self, "server2_NP", v),
-            lambda v: setattr(self, "server3_NP", v),
-            lambda v: setattr(self, "server4_NP", v),
-            lambda v: setattr(self, "server5_NP", v),
+        # -------- server NP arrays (computation) --------
+        # Each entry will be ONE np.ndarray or None
+        self.server_np: list[Optional[np.ndarray]] = [
+            None, None, None, None, None
         ]
 
     # ==================================================
-    # FILL SERVER DICT (STRUCTURE)
+    # STRUCTURE FILL
     # ==================================================
     def fill_server_dict(
         self,
@@ -109,15 +59,7 @@ class Request:
         gpu_clock: Optional[np.ndarray] = None,
         extras: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """
-        Fill STRUCTURED server data.
-
-        This function:
-        - Preserves semantic meaning
-        - Does NOT flatten
-        - Does NOT do computation
-        """
-        d = self._server_dicts[server_idx - 1]
+        d = self.server_dicts[server_idx - 1]
 
         d["ram_usage"] = ram_usage
         d["cpu_usage"] = cpu_usage
@@ -131,7 +73,7 @@ class Request:
         d["extras"] = extras
 
     # ==================================================
-    # FILL SERVER NP (COMPUTATION)
+    # COMPUTATION FILL (NUMBERS ONLY)
     # ==================================================
     def fill_server_np(
         self,
@@ -145,15 +87,6 @@ class Request:
         cpu_clock: Optional[np.ndarray] = None,
         gpu_clock: Optional[np.ndarray] = None,
     ) -> None:
-        """
-        Fill COMPUTATION array for a server.
-
-        This function:
-        - Flattens all arrays
-        - Concatenates ALL numbers
-        - Produces ONE 1D np.ndarray
-        - Loses semantic boundaries by design
-        """
         arrays = [
             ram_usage,
             cpu_usage,
@@ -168,17 +101,8 @@ class Request:
         if gpu_clock is not None:
             arrays.append(gpu_clock)
 
-        flat_numeric_array = np.concatenate(
-            [arr.ravel() for arr in arrays]
-        )
+        dumped = np.concatenate([arr.ravel() for arr in arrays])
+        self.server_np[server_idx - 1] = dumped
 
-        self._server_np_setters[server_idx - 1](flat_numeric_array)
-
-    # ==================================================
-    # DEBUG / LOGGING
-    # ==================================================
     def __repr__(self) -> str:
-        return (
-            f"<Request id={self.request_id} "
-            f"combo={self.combination}>"
-        )
+        return f"<Request id={self.request_id} combo={self.combination}>"
