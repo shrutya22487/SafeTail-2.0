@@ -117,7 +117,7 @@ class Request:
         extras: Optional[Dict[str, Any]] = None,
     ) -> None:
 
-        if not 0 <= server_idx < len(self.server_dicts):
+        if not 0 <= server_idx <= len(self.server_dicts):
             raise ValueError(f"Invalid server_idx: {server_idx}")
 
         d = self.server_dicts[server_idx]
@@ -224,7 +224,7 @@ class Request:
     # ==================================================
     def populate_request_from_csv(self, server_idx: int, combined_str: str) -> None:
         df = _get_server_df(server_idx)
-
+        # print('a')
         if combined_str not in df.index:
             raise ValueError(
                 f"No row for combination '{combined_str}' "
@@ -312,4 +312,5 @@ class Request:
         )
 
     def __repr__(self) -> str:
-        return f"<Request id={self.request_id} combo={self.combination}>"
+        return (f"<Request id={self.request_id} combo={self.combination} request_id:{self.request_id}, "
+                f"process_id: {self.process_id}, message_size: {self.message_size},bandwidth: {self.bandwidth},load:{self.load}>")

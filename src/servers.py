@@ -211,7 +211,7 @@ class Server:
             estimated_proc = self.compute_request_time(request)
             return False, "server full", estimated_proc
 
-        proc_time = self.compute_request_time(request)
+        proc_time, _ = self.compute_request_time(request)
         start_time = current_time
         finish_time = start_time + proc_time
 
