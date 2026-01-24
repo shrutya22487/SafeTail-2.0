@@ -89,34 +89,90 @@ class Controller:
     # ------------------------------------------------------------
     def compute_step_reward(self, request, action_subset=None):
         """
-        Step reward computed PER REQUEST:
-        
-        Reward function:
-        R = 1 + log( e^((1 - cm)(1 - cu)(1 - gm)(1 - gu)) - 1 )
+        Step reward computed PER REQUEST (per server).
 
+        Reward:
+        R = 1 + log( exp((1 - cm)(1 - cu)(1 - gm)(1 - gu)) - 1 )
+        
         Where:
         cm = RAM utilization = RAM_used / Total_RAM_available
         cu = CPU core utilization = Total_core_utilization_% / (Number_of_cores * 100)
         gm = GPU memory utilization = GPU_memory_used / Total_GPU_memory_available
         gu = GPU core utilization = GPU_core_utilization
+
+        If action_subset is None → compute for all servers
+        Otherwise → compute only for servers in action_subset
         """
-        # cm = request.cm
-        # cu = request.cu
-        # gm = request.gm
-        # gu = request.gu
 
-        # core = (1 - cm) * (1 - cu) * (1 - gm) * (1 - gu)
+        num_servers = len(request.server_dicts)
+        rewards = np.zeros(num_servers, dtype=float)
 
-        # # numerical stability
-        # reward = 1.0 + np.log(np.exp(core) - 1.0 + 1e-8)
+        # Decide which servers to evaluate (1-based)
+        if action_subset is None:
+            server_indices = range(1, num_servers + 1)
+        else:
+            server_indices = action_subset
 
-        # print(
-        #     f"[STEP REWARD] cm={cm:.3f}, cu={cu:.3f}, gm={gm:.3f}, gu={gu:.3f} → R={reward:.4f}"
-        # )
-        
-        reward = 0.6  # Placeholder for actual reward calculation
+        for server_idx in server_indices:
+            try:
+                # ---- Index validation ----
+                if not (1 <= server_idx <= num_servers):
+                    raise IndexError(f"[CONTROLLER]...[STEP REWARD][ERROR]Invalid server index: {server_idx}")
 
-        return np.array([reward, reward, reward, reward, reward]) # Placeholder for per-server rewards
+                i = server_idx - 1  # convert to 0-based
+                d = request.server_dicts[i]
+
+                # Skip if server dict not populated
+                if not d:
+                    rewards[i] = 0.0
+                    continue
+
+                # ---- Required fields ----
+                required_keys = [
+                    "ram_usage", "total_ram",
+                    "cpu_core_usage", "total_cpu_cores",
+                    "gpu_memory", "total_gpu_memory",
+                    "gpu_usage",
+                ]
+                for k in required_keys:
+                    if k not in d:
+                        raise KeyError(f"[CONTROLLER]...[STEP REWARD][ERROR] Missing key '{k}' for server {server_idx}")
+
+                # ---- Utilizations ----
+                cm = d["ram_usage"] / max(float(d["total_ram"]), 1e-8)
+
+                total_cpu_util = np.sum(np.asarray(d["cpu_core_usage"], dtype=float))
+                cu = total_cpu_util / (float(d["total_cpu_cores"]) * 100.0)
+
+                gm = d["gpu_memory"] / max(float(d["total_gpu_memory"]), 1e-8)
+
+                gu = float(d["gpu_usage"]) / 100.0
+
+                # Clamp
+                cm = np.clip(cm, 0.0, 1.0)
+                cu = np.clip(cu, 0.0, 1.0)
+                gm = np.clip(gm, 0.0, 1.0)
+                gu = np.clip(gu, 0.0, 1.0)
+
+                # ---- Reward ----
+                product = (1 - cm) * (1 - cu) * (1 - gm) * (1 - gu)
+
+                reward = 1.0 + np.log(np.expm1(product) + 1e-8)
+
+                # Final sanity check
+                if not np.isfinite(reward):
+                    raise ValueError(f"[CONTROLLER]...[STEP REWARD][ERROR] Non-finite reward computed for server {server_idx}")
+
+                rewards[i] = reward
+
+            except Exception as e:
+                # Fail-safe: zero reward + log
+                rewards[server_idx - 1] = 0.0
+                print(
+                    f"[CONTROLLER]...[STEP REWARD][ERROR] Server {server_idx}: {type(e).__name__} - {e}"
+                )
+
+        return rewards
 
 
     def compute_episodic_reward(self):
