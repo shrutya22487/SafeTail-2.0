@@ -85,8 +85,8 @@ class Request:
         self.load = np.asarray(load, dtype=int)
         self.step_reward_list = np.asarray([], dtype=float)
 
-        self.server_dicts: List[Dict[str, Any]] = [{} for _ in range(5)]
-        self.server_np: List[Optional[np.ndarray]] = [None] * 5
+        self.server_dicts: List[Dict[str, Any]] = [{} for _ in range(6)]
+        self.server_np: List[Optional[np.ndarray]] = [None] * 6
 
     # ==================================================
     # STRUCTURE FILL
@@ -234,7 +234,7 @@ class Request:
         row = df.loc[combined_str]
         if isinstance(row, pd.DataFrame):
             row = row.iloc[0]
-
+        # print('a')
         ram_usage = float(row.get("Peak RAM Usage (MB)", 0.0))
         gpu_usage = int(row.get("Peak GPU Usage (%)", 0))
         gpu_memory = float(row.get("Peak GPU Memory (MB)", 0.0))
