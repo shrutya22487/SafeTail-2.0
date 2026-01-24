@@ -72,16 +72,16 @@ class Request:
         request_id: int,
         process_id: int,
         combination: str,
-        message_size: np.ndarray,
-        bandwidth: np.ndarray,
+        message_size: int,
+        bandwidth:int,
         load: np.ndarray,
     ):
         self.request_id = int(request_id)
         self.process_id = int(process_id)
         self.combination = combination
 
-        self.message_size = np.asarray(message_size, dtype=float)
-        self.bandwidth = np.asarray(bandwidth, dtype=float)
+        self.message_size = int(message_size)
+        self.bandwidth = int(bandwidth)
         self.load = np.asarray(load, dtype=int)
         self.step_reward_list = np.asarray([], dtype=float)
 
