@@ -52,31 +52,23 @@ def request_to_state_array(request_obj):
 
             # Lists, tuples, or numpy arrays
             elif isinstance(value, (list, tuple, np.ndarray)):
-                try:
-                    arr = np.asarray(value, dtype=float).flatten()
-                    flat_values.extend(arr.tolist())
-                except Exception as e:
-                    print(f"[AGENT]    [WARN] Could not convert array-like attribute '{attr}' → {type(value)}: {e}")
-                    flat_values.append(-1.0)
-                    continue
 
-            # Dictionaries (flatten recursively)
-            elif isinstance(value, dict):
-                for k, v in value.items():
+                # Case 1: list/tuple of arrays or lists (ragged)
+                if isinstance(value, (list, tuple)) and any(
+                    isinstance(v, (list, tuple, np.ndarray)) for v in value
+                ):
+                    for v in value:
+                        try:
+                            flat_values.extend(np.asarray(v, dtype=float).flatten().tolist())
+                        except Exception:
+                            flat_values.append(-1.0)
+
+                # Case 2: normal numeric array / flat list
+                else:
                     try:
-                        if v is None:
-                            flat_values.append(-1.0)
-                        elif isinstance(v, (int, float, np.integer, np.floating)):
-                            flat_values.append(float(v))
-                        elif isinstance(v, (list, tuple, np.ndarray)):
-                            arr = np.asarray(v, dtype=float).flatten()
-                            flat_values.extend(arr.tolist())
-                        else:
-                            flat_values.append(-1.0)
-                    except Exception as e:
-                        print(f"[AGENT]    [WARN] Could not process dict key '{k}' in '{attr}': {e}")
+                        flat_values.extend(np.asarray(value, dtype=float).flatten().tolist())
+                    except Exception:
                         flat_values.append(-1.0)
-                        continue
 
             # Unsupported types (like strings or objects) → -1.0
             else:
