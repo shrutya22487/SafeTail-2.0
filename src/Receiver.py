@@ -128,77 +128,112 @@ class Receiver:
         try:
             with conn:
                 while True:
-                    header = self._recv_all(conn, 8)
+                    # ---- Receive header ----
+                    try:
+                        header = self._recv_all(conn, 8)
+                    except Exception as e:
+                        print(f"[RECEIVER, !] Failed to recv header from {addr}: {e}")
+                        break
+
                     if not header:
                         break
-                    length = struct.unpack(">Q", header)[0]
-                    payload = self._recv_all(conn, length)
+
+                    try:
+                        length = struct.unpack(">Q", header)[0]
+                    except struct.error as e:
+                        print(f"[RECEIVER, !] Invalid header from {addr}: {e}")
+                        break
+
+                    if length <= 0:
+                        print(f"[RECEIVER, !] Invalid payload length {length} from {addr}")
+                        break
+
+                    # ---- Receive payload ----
+                    try:
+                        payload = self._recv_all(conn, length)
+                    except Exception as e:
+                        print(f"[RECEIVER, !] Failed to recv payload from {addr}: {e}")
+                        break
+
                     if payload is None:
                         break
 
-                    # deserialize numpy array
-                    f = io.BytesIO(payload)
+                    # ---- Deserialize ----
                     try:
+                        f = io.BytesIO(payload)
                         arr = np.load(f, allow_pickle=True)
                     except Exception as e:
-                        print(f"[!] np.load failed from {addr}: {e}")
+                        print(f"[RECEIVER, !] np.load failed from {addr}: {e}")
                         break
 
-                    if not isinstance(arr, np.ndarray) or arr.dtype != object:
+                    # ---- Coerce to object ndarray ----
+                    if not isinstance(arr, np.ndarray):
+                        print(f"[RECEIVER, !] Payload from {addr} is not ndarray; skipping chunk")
+                        continue
+
+                    if arr.dtype != object:
                         try:
-                            arr = np.array(arr, dtype=object)
-                        except Exception:
-                            print(f"[RECEIVER,!] Failed to coerce payload from {addr}; skipping.")
+                            arr = np.asarray(arr, dtype=object)
+                        except Exception as e:
+                            print(f"[RECEIVER, !] Failed to coerce payload from {addr}: {e}")
                             continue
 
-                    # summary and debug print (type + short repr) and extract ids
+                    # ---- Debug summary + ID extraction ----
                     ids = []
                     for idx, req in enumerate(arr):
                         try:
-                            t = type(req)
-                            mod = t.__module__
-                            name = t.__name__
-                            try:
-                                r = repr(req)
-                                if len(r) > 200:
-                                    r = r[:200] + "..."
-                            except Exception:
-                                r = "<repr-failed>"
-                            print(f"[RECEIVER]    [DBG] item[{idx}]: type={mod}.{name}, repr={r}")
-                        except Exception:
-                            print(f"[RECEIVER]    [DBG] item[{idx}]: type={type(req)}")
+                            ids.append(self._extract_request_id(req))
+                        except Exception as e:
+                            print(
+                                f"[RECEIVER, !] Failed to extract request id "
+                                f"from {addr} item[{idx}]: {e}"
+                            )
+                            ids.append(None)
 
-                        ids.append(self._extract_request_id(req))
+                    print(
+                        f"[RECEIVER, >] Received chunk from {addr}: "
+                        f"len={len(arr)}, ids={ids}"
+                    )
 
-                    print(f"[RECEIVER, >] Received chunk from {addr}: len={len(arr)}, ids={ids}")
-
-                    # persist chunk
+                    # ---- Persist chunk ----
                     if self.PERSIST_CHUNKS:
                         ts = int(time.time() * 1000)
-                        filename = OUT_DIR / f"chunk_{addr[0].replace('.', '_')}_{addr[1]}_{ts}.npy"
+                        filename = OUT_DIR / (
+                            f"chunk_{addr[0].replace('.', '_')}_{addr[1]}_{ts}.npy"
+                        )
                         try:
                             np.save(filename, arr, allow_pickle=True)
-                            print(f"[✓] Saved chunk -> {filename}")
+                            print(f"[RECEIVER, ✓] Saved chunk -> {filename}")
                         except Exception as e:
-                            print(f"[!] Failed to save chunk: {e}")
-                    
+                            print(f"[RECEIVER, !] Failed to save chunk from {addr}: {e}")
 
-                    # Pass directly to controller queue
-                    self.controller.send_to_server(arr)
+                    # ---- Dispatch to controller ----
+                    try:
+                        self.controller.send_to_server(arr)
+                    except Exception as e:
+                        print(
+                            f"[RECEIVER, !] Failed to dispatch chunk from {addr}: {e}"
+                        )
+                        # Dispatch failure is serious → stop processing this connection
+                        break
 
-                    # OR Simluate processing time
+                    # ---- Optional simulated processing ----
                     # if simulate_processing and self.PROCESS_TIME_PER_CHUNK > 0:
                     #     time.sleep(self.PROCESS_TIME_PER_CHUNK)
 
+                    # ---- ACK ----
                     try:
                         conn.sendall(b"\x01")
                     except Exception:
+                        # ACK failure should not crash receiver
                         pass
 
         except Exception as e:
-            print(f"[RECEIVER, !] Exception while processing {addr}: {e}")
+            print(f"[RECEIVER, !] Fatal exception while processing {addr}: {e}")
+
         finally:
             print(f"[RECEIVER, -] Finished processing {addr}")
+
 
     def run(self):
         pending = deque()

@@ -109,18 +109,18 @@ class Controller:
 
         # Decide which servers to evaluate (1-based)
         if action_subset is None:
-            server_indices = range(1, num_servers + 1)
+            server_indices = range(num_servers)
         else:
             server_indices = action_subset
 
         for server_idx in server_indices:
             try:
                 # ---- Index validation ----
-                if not (1 <= server_idx <= num_servers):
+                if not (0 <= server_idx < num_servers):
                     raise IndexError(f"[CONTROLLER]...[STEP REWARD][ERROR]Invalid server index: {server_idx}")
 
-                i = server_idx - 1  # convert to 0-based
-                d = request.server_dicts[i]
+                i = server_idx  # 0-based
+                d = request.server_dicts[i]  # 1-based in request ??? or 0-based???
 
                 # Skip if server dict not populated
                 if not d:
@@ -215,10 +215,17 @@ class Controller:
         Process one step (ONE STEP = processing ONE request).
         Collects experiences but doesn't train yet.
         """
-        print(f"\n[CONTROLLER, STEP {self.current_step}] Processing request {request.request_id}.")
-        
-        load = self.find_free_servers()
-        num_free = sum(l != 1e9 for l in load)
+        try:
+            print(f"\n[CONTROLLER, STEP {self.current_step}] Processing request {request.request_id}.")
+        except Exception:
+            print(f"\n[CONTROLLER, STEP {self.current_step}] Processing request <unknown>.")
+
+        try:
+            load = self.find_free_servers()
+            num_free = sum(l != 1e9 for l in load)
+        except Exception as e:
+            print(f"[CONTROLLER, !] Failed to find free servers: {type(e).__name__} - {e}")
+            return
         
         if num_free == 0:
             print("[CONTROLLER, QUEUE] All servers busy. Retrying shortly.")
@@ -226,48 +233,97 @@ class Controller:
             return
 
         # update request state
-        request.load = load
-        request.total_delay = []
-        combined_strs = []
+        try:
+            request.load = load
+            request.total_delay = []
+            combined_strs = []
+        except Exception as e:
+            print(f"[CONTROLLER, !] Failed to update request state: {type(e).__name__} - {e}")
+            return
 
         for i in range(self.num_servers):
-            delay, combined_str = self.server_list[i].compute_request_time(request)
-            request.total_delay.append(delay)
-            combined_strs.append(combined_str)
-        
+            try:
+                delay, combined_str = self.server_list[i].compute_request_time(request)
+                request.total_delay.append(delay)
+                combined_strs.append(combined_str)
+            except Exception as e:
+                print(
+                    f"[CONTROLLER, !] Error computing request time "
+                    f"for server {i + 1}: {type(e).__name__} - {e}"
+                )
+                request.total_delay.append(float("inf"))
+                combined_strs.append(None)
+
         # Update request state to add data from servers
         for i in range(len(combined_strs)):
             server_index = i + 1
-            request.populate_request_from_csv(server_index, combined_strs[i])
-        
-        request.step_reward_list = self.compute_step_reward(request)
+            try:
+                if combined_strs[i] is not None:
+                    request.populate_request_from_csv(server_index, combined_strs[i])
+            except Exception as e:
+                print(
+                    f"[CONTROLLER, !] Failed to populate request from CSV "
+                    f"for server {server_index}: {type(e).__name__} - {e}"
+                )
+
+        try:
+            request.step_reward_list = self.compute_step_reward(request)
+        except Exception as e:
+            print(f"[CONTROLLER, !] Failed to compute initial step reward: {type(e).__name__} - {e}")
+            request.step_reward_list = np.zeros(self.num_servers, dtype=float)
         
         # agent action
-        action_subset, action_index = self.agent.get_action(request)
+        try:
+            action_subset, action_index = self.agent.get_action(request)
+        except Exception as e:
+            print(f"[CONTROLLER, !] Agent failed to produce action: {type(e).__name__} - {e}")
+            return
         
         # assign request
         for i in action_subset:
-            self.server_list[i].schedule_request(request)
+            try:
+                self.server_list[i].schedule_request(request)
+            except Exception as e:
+                print(
+                    f"[CONTROLLER, !] Failed to schedule request on server {i}: "
+                    f"{type(e).__name__} - {e}"
+                )
         
         # compute reward
-        final_step_reward_list = self.compute_step_reward(request, action_subset)
+        try:
+            final_step_reward_list = self.compute_step_reward(request, action_subset)
+            combined_step_reward = np.mean(final_step_reward_list)
+        except Exception as e:
+            print(f"[CONTROLLER, !] Failed to compute final step reward: {type(e).__name__} - {e}")
+            combined_step_reward = 0.0
         
-        combined_step_reward = np.mean(final_step_reward_list)
-        
-        print(f"[CONTROLLER, STEP {self.current_step}] Completed. Step reward: {combined_step_reward:.3f}")
+        try:
+            print(
+                f"[CONTROLLER, STEP {self.current_step}] Completed. "
+                f"Step reward: {combined_step_reward:.3f}"
+            )
+        except Exception:
+            pass
         
         # store experience
-        self.step_experiences.append({
-            "state": request,
-            "action": action_index,
-            "reward": combined_step_reward,
-            "next_state": request  # environment is partially observable anyway
-        })
+        try:
+            self.step_experiences.append({
+                "state": request,
+                "action": action_index,
+                "reward": combined_step_reward,
+                "next_state": request  # environment is partially observable anyway
+            })
+        except Exception as e:
+            print(f"[CONTROLLER, !] Failed to store experience: {type(e).__name__} - {e}")
         
-        self.step_rewards.append(combined_step_reward)
-        self.agent.epsilon_curve = np.append(
-            self.agent.epsilon_curve, self.agent.epsilon
-        )
+        try:
+            self.step_rewards.append(combined_step_reward)
+            self.agent.epsilon_curve = np.append(
+                self.agent.epsilon_curve, self.agent.epsilon
+            )
+        except Exception as e:
+            print(f"[CONTROLLER, !] Failed to update reward/epsilon tracking: {type(e).__name__} - {e}")
+
         self.current_step += 1
 
 
@@ -360,20 +416,53 @@ class Controller:
         - EPISODE = processing 3 chunks (chunk = list of requests)
         - Training happens ONCE per episode
         """
-        print("[CONTROLLER] Starting main control loop with step/episodic rewards.")
-        print(
-            f"[CONTROLLER] Processing chunk {self.current_chunk + 1}/"
-            f"{self.chunks_per_episode}"
-        )
-        for request in chunk:
-            with self.lock:
-                # Process this chunk as one STEP
-                self.process_step(request)
-        self.current_chunk += 1
-        
-        # Check if episode is complete
-        if self.current_chunk >= self.chunks_per_episode:
-            self.finalize_episode()
+        try:
+            print("[CONTROLLER] Starting main control loop with step/episodic rewards.")
+            print(
+                f"[CONTROLLER] Processing chunk {self.current_chunk + 1}/"
+                f"{self.chunks_per_episode}"
+            )
+
+            # Validate chunk
+            if chunk is None:
+                raise ValueError("[CONTROLLER, !] Received None chunk")
+
+            if not hasattr(chunk, "__iter__"):
+                raise TypeError(f"[CONTROLLER, !] Chunk is not iterable: {type(chunk)}")
+
+            for request in chunk:
+                try:
+                    with self.lock:
+                        # Process this chunk as one STEP
+                        self.process_step(request)
+                except Exception as e:
+                    # Fail-soft: skip bad request, continue episode
+                    print(
+                        f"[CONTROLLER, !] Error processing request "
+                        f"{repr(request)}: {type(e).__name__} - {e}"
+                    )
+                    continue
+
+            self.current_chunk += 1
+
+            # Check if episode is complete
+            if self.current_chunk >= self.chunks_per_episode:
+                try:
+                    self.finalize_episode()
+                except Exception as e:
+                    # Episode finalization is critical but must not crash controller
+                    print(
+                        f"[CONTROLLER, !] Error finalizing episode: "
+                        f"{type(e).__name__} - {e}"
+                    )
+
+        except Exception as e:
+            # Catch-all to protect controller thread
+            print(
+                f"[CONTROLLER, !] Fatal error in send_to_server: "
+                f"{type(e).__name__} - {e}"
+            )
+
 
     def run(self):
         # ---------------- start receiver ----------------
