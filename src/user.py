@@ -83,6 +83,7 @@ class Request:
         self.message_size = np.asarray(message_size, dtype=float)
         self.bandwidth = np.asarray(bandwidth, dtype=float)
         self.load = np.asarray(load, dtype=int)
+        self.step_reward_list = np.asarray([], dtype=float)
 
         self.server_dicts: List[Dict[str, Any]] = [{} for _ in range(5)]
         self.server_np: List[Optional[np.ndarray]] = [None] * 5
@@ -221,16 +222,16 @@ class Request:
     # ==================================================
     # POPULATE FROM CSV
     # ==================================================
-    def populate_request_from_csv(self, server_idx: int) -> None:
+    def populate_request_from_csv(self, server_idx: int, combined_str: str) -> None:
         df = _get_server_df(server_idx)
 
-        if self.combination not in df.index:
+        if combined_str not in df.index:
             raise ValueError(
-                f"No row for combination '{self.combination}' "
+                f"No row for combination '{combined_str}' "
                 f"in server{server_idx}.csv"
             )
 
-        row = df.loc[self.combination]
+        row = df.loc[combined_str]
         if isinstance(row, pd.DataFrame):
             row = row.iloc[0]
 

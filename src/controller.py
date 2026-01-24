@@ -87,7 +87,7 @@ class Controller:
     # ------------------------------------------------------------
     # Reward
     # ------------------------------------------------------------
-    def compute_step_reward(self, request):
+    def compute_step_reward(self, request, action_subset=None):
         """
         Step reward computed PER REQUEST:
         
@@ -116,7 +116,7 @@ class Controller:
         
         reward = 0.6  # Placeholder for actual reward calculation
 
-        return reward
+        return np.array([reward, reward, reward, reward, reward]) # Placeholder for per-server rewards
 
 
     def compute_episodic_reward(self):
@@ -171,12 +171,20 @@ class Controller:
 
         # update request state
         request.load = load
-        request.total_delay = [
-            self.server_list[i].compute_request_time(request)
-            for i in range(self.num_servers)
-        ]
+        request.total_delay = []
+        combined_strs = []
+
+        for i in range(self.num_servers):
+            delay, combined_str = self.server_list[i].compute_request_time(request)
+            request.total_delay.append(delay)
+            combined_strs.append(combined_str)
         
-        # Update request state to add data from servers @Shamik
+        # Update request state to add data from servers
+        for i in range(len(combined_strs)):
+            server_index = i + 1
+            request.populate_request_from_csv(server_index, combined_strs[i])
+        
+        request.step_reward_list = self.compute_step_reward(request)
         
         # agent action
         action_subset, action_index = self.agent.get_action(request)
@@ -186,19 +194,21 @@ class Controller:
             self.server_list[i].schedule_request(request)
         
         # compute reward
-        step_reward = self.compute_step_reward(request)
+        final_step_reward_list = self.compute_step_reward(request, action_subset)
         
-        print(f"[CONTROLLER, STEP {self.current_step}] Completed. Step reward: {step_reward:.3f}")
+        combined_step_reward = np.mean(final_step_reward_list)
+        
+        print(f"[CONTROLLER, STEP {self.current_step}] Completed. Step reward: {combined_step_reward:.3f}")
         
         # store experience
         self.step_experiences.append({
             "state": request,
             "action": action_index,
-            # "reward": step_reward,
+            "reward": combined_step_reward,
             "next_state": request  # environment is partially observable anyway
         })
         
-        self.step_rewards.append(step_reward)
+        self.step_rewards.append(combined_step_reward)
         self.agent.epsilon_curve = np.append(
             self.agent.epsilon_curve, self.agent.epsilon
         )

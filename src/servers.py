@@ -170,7 +170,7 @@ class Server:
         return first_letter, combined_string
 
     # ---------- Public API ----------
-    def compute_request_time(self, request: user.Request) -> float:
+    def compute_request_time(self, request: user.Request) -> tuple[float, str]:
         """
         Compute and return total delay for `request` WITHOUT scheduling it.
         Transmission uses FIXED_BANDWIDTH_KBPS when request does not provide load/bandwidth.
@@ -197,7 +197,7 @@ class Server:
         computation_delay_for_node = self._predict_using_letter(first_letter, combined_str)
 
         total_delay = propagation_delay_for_node + tramission_delay_for_node + computation_delay_for_node
-        return total_delay
+        return total_delay, combined_str
 
     def schedule_request(self, request: user.Request, current_time: float = None, do_sleep: bool = False):
         """
