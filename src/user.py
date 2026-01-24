@@ -117,10 +117,10 @@ class Request:
         extras: Optional[Dict[str, Any]] = None,
     ) -> None:
 
-        if not 1 <= server_idx <= len(self.server_dicts):
+        if not 0 <= server_idx < len(self.server_dicts):
             raise ValueError(f"Invalid server_idx: {server_idx}")
 
-        d = self.server_dicts[server_idx - 1]
+        d = self.server_dicts[server_idx]
         d.update(
             {
                 "ram_usage": ram_usage,
@@ -189,7 +189,7 @@ class Request:
           gpu_clock... ]
         """
 
-        if not 1 <= server_idx <= len(self.server_np):
+        if not 0 <= server_idx < len(self.server_np):
             raise ValueError(f"Invalid server_idx: {server_idx}")
 
         scalar_block = np.array(
