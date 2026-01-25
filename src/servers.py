@@ -138,7 +138,7 @@ class Server:
             return 0.0
 
         try:
-            print(f"\n[SERVER]    Using predictor for letter '{letter}' with combined string '{combined_str}'\n")
+            # print(f"\n[SERVER]    Using predictor for letter '{letter}' with combined string '{combined_str}'\n")
             return float(predictor.predict_from_combination(combined_str))
         except Exception:
             # fallback to CSV
