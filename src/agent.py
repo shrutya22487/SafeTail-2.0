@@ -5,10 +5,15 @@ from collections import deque
 import tensorflow.keras as keras
 import matplotlib.pyplot as plt
 import tensorflow as tf
+import traceback
+from pathlib import Path
+from tensorflow.keras import layers
 
 import servers
 import user
-from tensorflow.keras import layers
+
+
+BASE_DIR = Path(__file__).resolve().parent
 
 def get_subsets(fullset):
     """Helper: return all non-empty subsets of a set"""
@@ -29,14 +34,12 @@ def get_subsets(fullset):
     return np.array(subsets[1:], dtype=object)  # return numpy array of subsets
 
 
-def request_to_state_array(request_obj):
+def request_to_state_array(request_obj, remove_nan=True):
     """
     Converts a Request object into a flattened numeric NumPy array.
     Handles nested arrays, lists, dicts, and None values safely.
-    Replaces None or invalid numeric values with -1.0.
+    Replaces None, NaN, and ±inf with -1.0.
     """
-    import numpy as np
-    import traceback
 
     flat_values = []
 
@@ -45,51 +48,82 @@ def request_to_state_array(request_obj):
             # None → -1.0
             if value is None:
                 flat_values.append(-1.0)
-            
+
             elif isinstance(value, dict):
                 continue  # skip dictionaries entirely
-            
-            # Scalars (int, float, numpy scalar)
-            elif isinstance(value, (int, float, np.integer, np.floating)):
-                flat_values.append(float(value))
 
-            # Lists, tuples, or numpy arrays
+            # Scalars
+            elif isinstance(value, (int, float, np.integer, np.floating)):
+                val = float(value)
+                if remove_nan and not np.isfinite(val):
+                    print(f"[SANITIZE] Attribute '{attr}' scalar was {val}, replaced with -1.0")
+                    val = -1.0
+                flat_values.append(val)
+
+            # Lists / tuples / numpy arrays
             elif isinstance(value, (list, tuple, np.ndarray)):
 
-                # Case 1: list/tuple of arrays or lists (ragged)
+                # Ragged structures
                 if isinstance(value, (list, tuple)) and any(
                     isinstance(v, (list, tuple, np.ndarray)) for v in value
                 ):
                     for v in value:
                         try:
-                            flat_values.extend(np.asarray(v, dtype=float).flatten().tolist())
+                            flat = np.asarray(v, dtype=float).flatten()
+                            if remove_nan and not np.isfinite(flat).all():
+                                print(f"[SANITIZE] Attribute '{attr}' contained NaN/inf")
+                                flat = np.nan_to_num(
+                                    flat,
+                                    nan=-1.0,
+                                    posinf=-1.0,
+                                    neginf=-1.0
+                                )
+                            flat_values.extend(flat.tolist())
                         except Exception:
                             flat_values.append(-1.0)
 
-                # Case 2: normal numeric array / flat list
+                # Normal numeric array / flat list
                 else:
                     try:
-                        flat_values.extend(np.asarray(value, dtype=float).flatten().tolist())
+                        flat = np.asarray(value, dtype=float).flatten()
+                        if remove_nan and not np.isfinite(flat).all():
+                            print(f"[SANITIZE] Attribute '{attr}' contained NaN/inf")
+                            flat = np.nan_to_num(
+                                flat,
+                                nan=-1.0,
+                                posinf=-1.0,
+                                neginf=-1.0
+                            )
+                        flat_values.extend(flat.tolist())
                     except Exception:
                         flat_values.append(-1.0)
 
-            # Unsupported types (like strings or objects) → -1.0
+            # Unsupported types
             else:
                 flat_values.append(-1.0)
 
         except Exception as e:
-            print(f"[AGENT]    [ERROR] Failed to process attribute '{attr}' ({type(value)}): {e}")
+            print(f"[AGENT][ERROR] Failed to process attribute '{attr}' ({type(value)}): {e}")
             traceback.print_exc()
             flat_values.append(-1.0)
-            continue
 
-    # Final safety conversion
+    # Final safety conversion (last line of defense)
     try:
-        return np.array(flat_values, dtype=float)
+        arr = np.asarray(flat_values, dtype=float)
+        if remove_nan:
+            arr = np.nan_to_num(
+                arr,
+                nan=-1.0,
+                posinf=-1.0,
+                neginf=-1.0
+            )
+        return arr
+
     except Exception as e:
-        print(f"[AGENT]    [FATAL] Could not create NumPy array from collected values: {e}")
+        print(f"[AGENT][FATAL] Could not create NumPy array: {e}")
         traceback.print_exc()
-        return np.full(1, -1.0, dtype=float)  # fallback to safe dummy vector
+        return np.full(1, -1.0, dtype=float)
+
 
 
 
@@ -134,7 +168,55 @@ class DQNAgent:
         self.server_list = server_list
 
         self.prediction_times = []
+        self.remove_nan_in_state = False # whether to sanitize NaN/inf in state representation
+        
+        # DEBUGGING: dump replay batches to file
+        self.debug_replay_dump = True
+        self.replay_dump_file = BASE_DIR / "test_files" / "replay_debug_dump.txt"
+        # Ensure directory exists
+        self.replay_dump_file.parent.mkdir(parents=True, exist_ok=True)
+        # Clear file once at start
+        with open(self.replay_dump_file, "w") as f:
+            f.write("REPLAY DEBUG LOG\n")
 
+
+    
+    # Helper function to dump replay batch for debugging
+    def dump_replay_batch(
+        self,
+        states,
+        next_states,
+        states_padded,
+        next_states_padded,
+        actions,
+        rewards
+    ):
+        with open(self.replay_dump_file, "a") as f:
+            f.write("\n" + "=" * 80 + "\n")
+            f.write("NEW EXPERIENCE REPLAY MINIBATCH\n")
+            f.write("=" * 80 + "\n\n")
+
+            f.write(f"Batch size: {len(states)}\n\n")
+
+            for i in range(len(states)):
+                f.write(f"--- SAMPLE {i} ---\n")
+
+                f.write("RAW STATE (flattened):\n")
+                f.write(f"{states[i].flatten().tolist()}\n\n")
+
+                f.write("RAW NEXT STATE (flattened):\n")
+                f.write(f"{next_states[i].flatten().tolist()}\n\n")
+
+                f.write(f"ACTION: {actions[i]}\n")
+                f.write(f"REWARD: {rewards[i]}\n\n")
+
+                f.write("PADDED STATE:\n")
+                f.write(f"{states_padded[i].flatten().tolist()}\n\n")
+
+                f.write("PADDED NEXT STATE:\n")
+                f.write(f"{next_states_padded[i].flatten().tolist()}\n\n")
+
+            f.write("\n")
 
     def timed_predict(self, state_tensor):
         """Runs model inference and measures time."""
@@ -195,8 +277,8 @@ class DQNAgent:
         The model will encode them during training, allowing encoder to learn.
         """
         # Convert to flattened arrays and reshape to (variable_length, 1)
-        state_vec = request_to_state_array(state_request).reshape(-1, 1)
-        next_state_vec = request_to_state_array(next_state_request).reshape(-1, 1)
+        state_vec = request_to_state_array(state_request, self.remove_nan_in_state).reshape(-1, 1)
+        next_state_vec = request_to_state_array(next_state_request, self.remove_nan_in_state).reshape(-1, 1)
 
         # Store RAW states (NOT encoded!)
         self.memory.append((state_vec, action, reward, next_state_vec))
@@ -210,7 +292,7 @@ class DQNAgent:
         """
 
         # 1️⃣ Convert Request object → numeric state vector (variable length)
-        state_flattened = request_to_state_array(request)
+        state_flattened = request_to_state_array(request, self.remove_nan_in_state)
 
         # 2️⃣ Reshape for model input: (1, variable_length, 1)
         state_tensor = state_flattened.reshape(1, -1, 1).astype(np.float32)
@@ -245,6 +327,7 @@ class DQNAgent:
         States are stored RAW, so model encodes them during forward pass.
         Gradients flow through encoder layers during backpropagation.
         """
+        
         minibatch = random.sample(self.memory, batch_size)
         states, actions, rewards, next_states = map(list, zip(*minibatch))
 
@@ -256,6 +339,7 @@ class DQNAgent:
             dtype='float32',
             value=-1.0
         )
+
         next_states_padded = tf.keras.preprocessing.sequence.pad_sequences(
             [s.flatten() for s in next_states],
             padding='post',
@@ -267,16 +351,35 @@ class DQNAgent:
         states_padded = states_padded.reshape(batch_size, -1, 1)
         next_states_padded = next_states_padded.reshape(batch_size, -1, 1)
 
+        # 🔥 DUMP REAL INPUTS HERE: to check if there are any nan values in the state representation (WILL CAUSE PROBLEMS LATER)
+        if self.debug_replay_dump:
+            self.dump_replay_batch(
+                states=states,
+                next_states=next_states,
+                states_padded=states_padded,
+                next_states_padded=next_states_padded,
+                actions=actions,
+                rewards=rewards
+            )
+        
         # Forward pass (model encodes internally)
         current_q = self.model.predict(states_padded, verbose=0)
         next_q_values = self.model.predict(next_states_padded, verbose=0)
 
         # Compute targets using Bellman equation
         targets = current_q.copy()
-        targets[np.arange(batch_size), actions] = rewards + self.reward_gamma * np.amax(next_q_values, axis=1)
+        targets[np.arange(batch_size), actions] = (
+            rewards + self.reward_gamma * np.amax(next_q_values, axis=1)
+        )
 
         # Train (gradients flow through encoder!)
-        hist = self.model.fit(states_padded, targets, epochs=self.epochs, verbose=1, validation_split=0.2)
+        hist = self.model.fit(
+            states_padded,
+            targets,
+            epochs=self.epochs,
+            verbose=1,
+            validation_split=0.2
+        )
 
         # Decay epsilon
         if self.epsilon > self.epsilon_min:
@@ -284,6 +387,7 @@ class DQNAgent:
 
         self.loss = np.append(self.loss, hist.history['loss'][0])
         self.val_loss = np.append(self.val_loss, hist.history['val_loss'][0])
+
 
 
 
