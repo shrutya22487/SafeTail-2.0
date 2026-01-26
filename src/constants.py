@@ -1,7 +1,12 @@
 no_of_sensors = 1
 max_bandwidth = 20
 median_computation_delay = 0.048
-no_of_episodes = 10000     
+total_no_request = 450
+chunk_size = 10
+no_of_chunk= total_no_request/chunk_size
+episode_size = 3
+no_of_burst = 45
+no_of_episodes = no_of_chunk/episode_size     
 len_of_episode = 50
 max_load = 5 # make it 20
 beta = 5 # Number of edge servers.

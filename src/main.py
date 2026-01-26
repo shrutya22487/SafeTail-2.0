@@ -140,9 +140,9 @@ def main():
     # ---------------- create sender ----------------
     sender = SenderBursts(
         arr=None,               # auto-generate using request_factory
-        sample_count=15,        # total requests
-        chunk_size=5,          # requests per chunk
-        bursts=3,
+        sample_count=constants.total_no_request,        # total requests
+        chunk_size=constants.chunk_size,          # requests per chunk
+        bursts=constants.no_of_burst,
         min_burst=1,
         max_burst=2,
         min_interval=0.2,
@@ -161,13 +161,18 @@ def main():
     except KeyboardInterrupt:
         print("[MAIN] Sender interrupted.")
     finally:
-        # give some time for receiver to finish processing
-        time.sleep(1.0)
-        print("[MAIN] Stopping receiver...")
-        receiver.stop()
-        if getattr(receiver, "_thread", None):
-            receiver._thread.join(timeout=3.0)
-        print("[MAIN] Exiting.")
+        print("[MAIN] Waiting for training to finish...")
+
+        try:
+            controller.training_done.wait()   # BLOCKS safely
+        except KeyboardInterrupt:
+            print("\n[MAIN] Ctrl+C received early.")
+        finally:
+            print("[MAIN] Stopping receiver...")
+            receiver.stop()
+            receiver._thread.join(timeout=5)
+            print("[MAIN] Exiting cleanly.")
+
 
 if __name__ == "__main__":
     main()

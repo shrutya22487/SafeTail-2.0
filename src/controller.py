@@ -25,7 +25,8 @@ class Controller:
         self.current_chunk = 0
         self.current_step = 0
         self.current_episode = 0
-
+        self.training_done = threading.Event()
+        self.expected_episodes = constants.no_of_episodes
         self.step_experiences = []
         self.step_rewards = []
 
@@ -378,6 +379,10 @@ class Controller:
         self.current_chunk = 0
         self.current_step = 0
         self.current_episode += 1
+        if self.current_episode >= self.expected_episodes:
+            print("[CONTROLLER] ✅ All training episodes finished.")
+            self.training_done.set()
+
 
         print(f"{'='*60}\n")
 
