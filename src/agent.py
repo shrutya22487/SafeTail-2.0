@@ -45,7 +45,10 @@ def request_to_state_array(request_obj):
             # None → -1.0
             if value is None:
                 flat_values.append(-1.0)
-
+            
+            elif isinstance(value, dict):
+                continue  # skip dictionaries entirely
+            
             # Scalars (int, float, numpy scalar)
             elif isinstance(value, (int, float, np.integer, np.floating)):
                 flat_values.append(float(value))
@@ -101,6 +104,7 @@ class DQNAgent:
         self.alpha = alpha
         self.reward_gamma = reward_gamma
         self.beta = beta
+        self.subsets = get_subsets(set(range(self.beta)))
         self.median_computation_delay = median_computation_delay
         self.epsilon = epsilon
         self.epsilon_min = epsilon_min
@@ -159,7 +163,7 @@ class DQNAgent:
         encoder_input = keras.Input(shape=(None, 1), name='raw_state_input')
 
         # ===== ENCODER LAYERS =====
-        # These will now be trained along with the DQN!
+        # These will be trained along with the DQN!
         x = layers.Dense(128, activation='relu', name='encoder_expand')(encoder_input)
         x = layers.Dense(64, activation='relu', name='encoder_project')(x)
         x = layers.GlobalAveragePooling1D(name='encoder_pool')(x)  # (batch, 64)
@@ -211,9 +215,6 @@ class DQNAgent:
         # 2️⃣ Reshape for model input: (1, variable_length, 1)
         state_tensor = state_flattened.reshape(1, -1, 1).astype(np.float32)
 
-        # 3️⃣ Build all possible non-empty subsets of servers (0-based indexing)
-        subsets = get_subsets(set(range(self.beta)))
-
         # 4️⃣ Epsilon-greedy exploration
         if np.random.rand() <= self.epsilon:
             self.exploit_or_explore = np.append(self.exploit_or_explore, "explore")
@@ -228,8 +229,8 @@ class DQNAgent:
             # Convert to NumPy for argmax
             action = np.argmax(action_vals.numpy()[0])
 
-        # 5️⃣ Get subset of servers for this action
-        return_arr = subsets[action]
+        # 5️⃣ Get subset of servers for this action, Access all possible non-empty subsets of servers (0-based indexing)
+        return_arr = self.subsets[action]
 
         # 6️⃣ Log and return
         self.episode_access_rate = np.append(self.episode_access_rate, len(return_arr) / self.beta)
