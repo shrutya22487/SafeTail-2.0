@@ -93,12 +93,12 @@ class Controller:
         Step reward computed PER REQUEST (per server).
 
         Reward:
-        R = 1 + log( exp((1 - cm)(1 - cu)(1 - gm)(1 - gu)) - 1 )
+        R = 1 + log( exp((1 - cm)(1 - cu)(1 - gm)(1 - gu) - 1 ))
         
         Where:
         cm = RAM utilization = RAM_used / Total_RAM_available
-        cu = CPU core utilization = Total_core_utilization_% / (Number_of_cores * 100)
-        gm = GPU memory utilization = GPU_memory_used / Total_GPU_memory_available
+        cu = CPU core utilization = CPU cores used / Number_of_cores
+        gm = GPU memory utilization = peak GPU_memory / Total_GPU_memory_available
         gu = GPU core utilization = GPU_core_utilization
 
         If action_subset is None → compute for all servers
@@ -140,25 +140,33 @@ class Controller:
                         raise KeyError(f"[CONTROLLER]...[STEP REWARD][ERROR] Missing key '{k}' for server {server_idx}")
 
                 # ---- Utilizations ----
-                cm = d["ram_usage"] / max(float(d["total_ram"]), 1e-8)
+                # print()
+                GB_TO_MB = 1024.0
 
-                total_cpu_util = np.sum(np.asarray(d["cpu_core_usage"], dtype=float))
-                cu = total_cpu_util / (float(d["total_cpu_cores"]) * 100.0)
+                total_ram_mb = float(d["total_ram"]) * GB_TO_MB
+                cm = d["ram_usage"] / max(total_ram_mb, 1e-8)
+                # print(f"RAM Usage: {d['ram_usage']}, Total RAM: {d['total_ram']}, CM: {cm}")
 
-                gm = d["gpu_memory"] / max(float(d["total_gpu_memory"]), 1e-8)
+                cpu_cores_used = d["cpu_core_used"]
+                cu = cpu_cores_used / (float(d["total_cpu_cores"]))
+                # print(f"CPU Usage: {cpu_cores_used}, Total CPU Cores: {d['total_cpu_cores']}, CU: {cu}")
+
+                total_gpu_mem_mb = float(d["total_gpu_memory"]) * GB_TO_MB
+                gm = d["gpu_memory"] / max(total_gpu_mem_mb, 1e-8)
+                # print(f"GPU Memory Usage: {d['gpu_memory']}, Total GPU Memory: {d['total_gpu_memory']}, GM: {gm}")
 
                 gu = float(d["gpu_usage"]) / 100.0
-
-                # Clamp
-                cm = np.clip(cm, 0.0, 1.0)
-                cu = np.clip(cu, 0.0, 1.0)
-                gm = np.clip(gm, 0.0, 1.0)
-                gu = np.clip(gu, 0.0, 1.0)
+                # print(f"GPU Usage: {d['gpu_usage']}, GU: {gu}")
+                # print()
 
                 # ---- Reward ----
                 product = (1 - cm) * (1 - cu) * (1 - gm) * (1 - gu)
 
-                reward = 1.0 + np.log(np.expm1(product) + 1e-8)
+                reward = 1.0 + np.log(np.exp(product - 1.0))
+                # print(f"[CONTROLLER]...[STEP REWARD] Server {server_idx}: Reward={reward:.6f}")
+                
+                # print()
+                # print()
 
                 # Final sanity check
                 if not np.isfinite(reward):
@@ -361,7 +369,12 @@ class Controller:
             print(f"[CONTROLLER, EPISODE {self.current_episode}] Training agent...")
             self.agent.experience_replay(self.agent.batch_size)
             print(f"[CONTROLLER, EPISODE {self.current_episode}] Training complete.")
-
+        else:
+            print(
+                f"[CONTROLLER, EPISODE {self.current_episode}] "
+                f"Not enough experiences to train "
+                f"(have {len(self.agent.memory)}, need {self.agent.batch_size})"
+            )
         # Log episode metrics
         print(f"[CONTROLLER, EPISODE {self.current_episode}] "
               f"Experiences: {len(self.step_experiences)}, "

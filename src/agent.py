@@ -275,7 +275,7 @@ class DQNAgent:
         targets[np.arange(batch_size), actions] = rewards + self.reward_gamma * np.amax(next_q_values, axis=1)
 
         # Train (gradients flow through encoder!)
-        hist = self.model.fit(states_padded, targets, epochs=self.epochs, verbose=0, validation_split=0.2)
+        hist = self.model.fit(states_padded, targets, epochs=self.epochs, verbose=1, validation_split=0.2)
 
         # Decay epsilon
         if self.epsilon > self.epsilon_min:
