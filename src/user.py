@@ -18,6 +18,7 @@ def _get_server_df(server_idx: int) -> pd.DataFrame:
     - Indexed by 'Combination' for O(1) lookup
     - Treated as read-only
     """
+    server_idx = server_idx+1
     if server_idx in _CSV_CACHE:
         return _CSV_CACHE[server_idx]
 
@@ -86,7 +87,7 @@ class Request:
         self.step_reward_list = np.asarray([], dtype=float)
 
         self.server_dicts: List[Dict[str, Any]] = [{} for _ in range(6)]
-        self.server_np: List[Optional[np.ndarray]] = [None] * 6
+        self.server_np: List[Optional[np.ndarray]] = [None] * 5
 
     # ==================================================
     # STRUCTURE FILL
@@ -217,7 +218,7 @@ class Request:
             gpu_clock.ravel(),
         ]
 
-        self.server_np[server_idx - 1] = np.concatenate(arrays)
+        self.server_np[server_idx] = np.concatenate(arrays)
 
     # ==================================================
     # POPULATE FROM CSV

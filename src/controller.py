@@ -265,7 +265,7 @@ class Controller:
 
         # Update request state to add data from servers
         for i in range(len(combined_strs)):
-            server_index = i + 1
+            server_index = i
             try:
                 if combined_strs[i] is not None:
                     request.populate_request_from_csv(server_index, combined_strs[i])
