@@ -97,7 +97,7 @@ class Controller:
         
         Where:
         cm = RAM utilization = RAM_used / Total_RAM_available
-        cu = CPU core utilization = CPU cores used / Number_of_cores
+        cu = CPU core utilization = (sum of CPU core percentages/100) / Number_of_cores
         gm = GPU memory utilization = peak GPU_memory / Total_GPU_memory_available
         gu = GPU core utilization = GPU_core_utilization
 
@@ -147,9 +147,9 @@ class Controller:
                 cm = d["ram_usage"] / max(total_ram_mb, 1e-8)
                 # print(f"RAM Usage: {d['ram_usage']}, Total RAM: {d['total_ram']}, CM: {cm}")
 
-                cpu_cores_used = d["cpu_core_used"]
-                cu = cpu_cores_used / (float(d["total_cpu_cores"]))
-                # print(f"CPU Usage: {cpu_cores_used}, Total CPU Cores: {d['total_cpu_cores']}, CU: {cu}")
+                cpu_cores_utilised = np.sum(d["cpu_usage"])/100.0
+                cu = cpu_cores_utilised / (float(d["total_cpu_cores"]))
+                # print(f"CPU Usage: {cpu_cores_utilised}, Total CPU Cores: {d['total_cpu_cores']}, CU: {cu}")
 
                 total_gpu_mem_mb = float(d["total_gpu_memory"]) * GB_TO_MB
                 gm = d["gpu_memory"] / max(total_gpu_mem_mb, 1e-8)
@@ -162,7 +162,7 @@ class Controller:
                 # ---- Reward ----
                 product = (1 - cm) * (1 - cu) * (1 - gm) * (1 - gu)
 
-                reward = 1.0 + np.log(np.exp(product - 1.0))
+                reward = np.log(np.exp(product + 1.0))
                 # print(f"[CONTROLLER]...[STEP REWARD] Server {server_idx}: Reward={reward:.6f}")
                 
                 # print()
@@ -187,7 +187,7 @@ class Controller:
     def compute_episodic_reward(self):
         """
         Compute episodic reward as per new architecture:
-        R_episode = Σ(γ^i * R_step^(i+1)) + ω - W_avg
+        R_episode = Σ(γ^i * (i+1th R_step)) + ω - W_avg
 
         Where:
         - γ is discount factor
