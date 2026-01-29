@@ -242,6 +242,8 @@ class Controller:
         if num_free == 0:
             print("[CONTROLLER, QUEUE] All servers busy. Retrying shortly.")
             time.sleep(0.1)
+            # try once more
+            self.process_step(request)
             return
 
         # update request state
