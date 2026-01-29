@@ -29,6 +29,7 @@ class Controller:
         self.expected_episodes = constants.no_of_episodes
         self.step_experiences = []
         self.step_rewards = []
+        self.episode_start_time = None
 
         # ---------------- Agent ----------------
         self.agent = DQNAgent(
@@ -383,6 +384,14 @@ class Controller:
               f"Episodic Reward: {episodic_reward:.3f}, "
               f"Epsilon: {self.agent.epsilon:.6f}")
 
+        episode_end_time = time.time()
+        episode_duration = episode_end_time - self.episode_start_time
+        
+        print(
+            f"[CONTROLLER, EPISODE {self.current_episode}] "
+            f"Time taken: {episode_duration:.2f} seconds"
+        )
+        self.episode_start_time = None
         # Checkpoint every N episodes
         # if self.current_episode % 10 == 0:
         #     self.save_checkpoint()
@@ -433,11 +442,13 @@ class Controller:
 
         Architecture:
         - STEP = processing one of the requests in a chunk
-        - EPISODE = processing 3 chunks (chunk = list of requests)
+        - EPISODE = processing N chunks (chunk = list of requests)
         - Training happens ONCE per episode
         """
         try:
             print("[CONTROLLER] Starting main control loop with step/episodic rewards.")
+            if self.current_chunk == 0:
+                self.episode_start_time = time.time()
             print(
                 f"[CONTROLLER] Processing chunk {self.current_chunk + 1}/"
                 f"{self.chunks_per_episode}"
@@ -445,10 +456,13 @@ class Controller:
 
             # Validate chunk
             if chunk is None:
+                self.episode_start_time = None
                 raise ValueError("[CONTROLLER, !] Received None chunk")
 
             if not hasattr(chunk, "__iter__"):
+                self.episode_start_time = None
                 raise TypeError(f"[CONTROLLER, !] Chunk is not iterable: {type(chunk)}")
+            
 
             for request in chunk:
                 try:
@@ -469,8 +483,10 @@ class Controller:
             if self.current_chunk >= self.chunks_per_episode:
                 try:
                     self.finalize_episode()
+                    
                 except Exception as e:
                     # Episode finalization is critical but must not crash controller
+                    self.episode_start_time = None
                     print(
                         f"[CONTROLLER, !] Error finalizing episode: "
                         f"{type(e).__name__} - {e}"

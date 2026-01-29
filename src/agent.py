@@ -171,7 +171,7 @@ class DQNAgent:
         self.remove_nan_in_state = False # whether to sanitize NaN/inf in state representation
         
         # DEBUGGING: dump replay batches to file
-        self.debug_replay_dump = True
+        self.debug_replay_dump = False
         self.replay_dump_file = BASE_DIR / "test_files" / "replay_debug_dump.txt"
         # Ensure directory exists
         self.replay_dump_file.parent.mkdir(parents=True, exist_ok=True)
