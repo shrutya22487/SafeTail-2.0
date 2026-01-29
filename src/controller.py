@@ -203,8 +203,10 @@ class Controller:
         )
 
         # Degree of satisfaction (simplified: percentage of successful assignments)
-        # TODO: Implement proper deadline-based satisfaction metric
-        omega = 1.0  # Placeholder: assume all requests satisfied
+        # calculated as total number of successful requests over total no. of request expected to be completed in an episode
+        # len(self.step_rewards) = number of requests completed in this episode
+        # (constants.total_no_request/constants.no_of_episodes) = expected number of requests per episode
+        omega = len(self.step_rewards) / (constants.total_no_request/constants.no_of_episodes)
 
         # Average waiting time across the episode
         avg_waiting_time = 0 # Placeholder: implement actual waiting time calculation
