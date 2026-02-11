@@ -10,6 +10,7 @@ import servers
 import constants
 from agent import DQNAgent
 
+
 class Controller:
     def __init__(self, num_servers=5, steps_per_episode=10, chunks_per_episode=3):
 
@@ -21,7 +22,7 @@ class Controller:
 
         # ---------------- Episode / Step tracking ----------------
         self.chunks_per_episode = chunks_per_episode
-        self.steps_per_episode = steps_per_episode # Use if required.
+        self.steps_per_episode = steps_per_episode  # Use if required.
         self.current_chunk = 0
         self.current_step = 0
         self.current_episode = 0
@@ -30,6 +31,11 @@ class Controller:
         self.step_experiences = []
         self.step_rewards = []
         self.episode_start_time = None
+
+        # ---------------- Plotting Configuration ----------------
+        self.plot_every_n_episodes = 10  # Generate plots every N episodes
+        self.plot_dir = Path("training_logs/plots")
+        self.plot_dir.mkdir(parents=True, exist_ok=True)
 
         # ---------------- Agent ----------------
         self.agent = DQNAgent(
@@ -49,7 +55,11 @@ class Controller:
             server_list=self.server_list,
             request=None
         )
-    
+
+        # ---------------- Tracking for plots ----------------
+        self.episode_latencies = []  # Track latencies per episode
+        self.episode_deviations = []  # Track deviations per episode
+
     # ------------------------------------------------------------
     # Utility
     # ------------------------------------------------------------
@@ -74,9 +84,9 @@ class Controller:
                 ok, finish, proc = self.server_list[i].schedule_request(request)
 
                 if ok:
-                    print(f"[CONTROLLER, ASSIGN] Req {request.request_id} → Server {i+1} ({proc:.3f}s)")
+                    print(f"[CONTROLLER, ASSIGN] Req {request.request_id} → Server {i + 1} ({proc:.3f}s)")
                 else:
-                    print(f"[CONTROLLER, BUSY] Server {i+1} full for Req {request.request_id}")
+                    print(f"[CONTROLLER, BUSY] Server {i + 1} full for Req {request.request_id}")
 
             except (IndexError, TypeError) as e:
                 print(f"[CONTROLLER, ERROR:1] {e}")
@@ -85,7 +95,7 @@ class Controller:
                 print(f"[CONTROLLER, ERROR:2] Unexpected error for Req {request.request_id} on server {i}: {e}")
 
         print("\n---- ---- ---- \n")
-        
+
     # ------------------------------------------------------------
     # Reward
     # ------------------------------------------------------------
@@ -95,7 +105,7 @@ class Controller:
 
         Reward:
         R = 1 + log( exp((1 - cm)(1 - cu)(1 - gm)(1 - gu) - 1 ))
-        
+
         Where:
         cm = RAM utilization = RAM_used / Total_RAM_available
         cu = CPU core utilization = (sum of CPU core percentages/100) / Number_of_cores
@@ -148,7 +158,7 @@ class Controller:
                 cm = d["ram_usage"] / max(total_ram_mb, 1e-8)
                 # print(f"RAM Usage: {d['ram_usage']}, Total RAM: {d['total_ram']}, CM: {cm}")
 
-                cpu_cores_utilised = np.sum(d["cpu_usage"])/100.0
+                cpu_cores_utilised = np.sum(d["cpu_usage"]) / 100.0
                 cu = cpu_cores_utilised / (float(d["total_cpu_cores"]))
                 # print(f"CPU Usage: {cpu_cores_utilised}, Total CPU Cores: {d['total_cpu_cores']}, CU: {cu}")
 
@@ -165,13 +175,14 @@ class Controller:
 
                 reward = np.log(np.exp(product + 1.0))
                 # print(f"[CONTROLLER]...[STEP REWARD] Server {server_idx}: Reward={reward:.6f}")
-                
+
                 # print()
                 # print()
 
                 # Final sanity check
                 if not np.isfinite(reward):
-                    raise ValueError(f"[CONTROLLER]...[STEP REWARD][ERROR] Non-finite reward computed for server {server_idx}")
+                    raise ValueError(
+                        f"[CONTROLLER]...[STEP REWARD][ERROR] Non-finite reward computed for server {server_idx}")
 
                 rewards[i] = reward
 
@@ -183,7 +194,6 @@ class Controller:
                 )
 
         return rewards
-
 
     def compute_episodic_reward(self):
         """
@@ -207,10 +217,10 @@ class Controller:
         # calculated as total number of successful requests over total no. of request expected to be completed in an episode
         # len(self.step_rewards) = number of requests completed in this episode
         # (constants.total_no_request/constants.no_of_episodes) = expected number of requests per episode
-        omega = len(self.step_rewards) / (constants.total_no_request/constants.no_of_episodes)
+        omega = len(self.step_rewards) / (constants.total_no_request / constants.no_of_episodes)
 
         # Average waiting time across the episode
-        avg_waiting_time = 0 # Placeholder: implement actual waiting time calculation
+        avg_waiting_time = 0  # Placeholder: implement actual waiting time calculation
 
         # Episodic reward
         episodic_reward = discounted_step_rewards + omega - avg_waiting_time
@@ -220,7 +230,6 @@ class Controller:
               f"R_episode: {episodic_reward:.3f}")
 
         return episodic_reward
-
 
     def process_step(self, request):
         """
@@ -238,7 +247,7 @@ class Controller:
         except Exception as e:
             print(f"[CONTROLLER, !] Failed to find free servers: {type(e).__name__} - {e}")
             return
-        
+
         if num_free == 0:
             print("[CONTROLLER, QUEUE] All servers busy. Retrying shortly.")
             time.sleep(0.1)
@@ -285,14 +294,14 @@ class Controller:
         except Exception as e:
             print(f"[CONTROLLER, !] Failed to compute initial step reward: {type(e).__name__} - {e}")
             request.step_reward_list = np.zeros(self.num_servers, dtype=float)
-        
+
         # agent action
         try:
             action_subset, action_index = self.agent.get_action(request)
         except Exception as e:
             print(f"[CONTROLLER, !] Agent failed to produce action: {type(e).__name__} - {e}")
             return
-        
+
         # assign request
         for i in action_subset:
             try:
@@ -302,15 +311,26 @@ class Controller:
                     f"[CONTROLLER, !] Failed to schedule request on server {i}: "
                     f"{type(e).__name__} - {e}"
                 )
-        
-        # compute reward
+
+        # compute reward and track latency metrics
         try:
             final_step_reward_list = self.compute_step_reward(request, action_subset)
             combined_step_reward = np.mean(final_step_reward_list)
+
+            # Track observed latency (minimum among selected servers)
+            if len(action_subset) > 0 and hasattr(request, 'total_delay'):
+                observed_latency = min(request.total_delay[i] for i in action_subset
+                                       if i < len(request.total_delay))
+                self.episode_latencies.append(observed_latency)
+
+                # Track deviation from median
+                deviation = abs(observed_latency - self.agent.median_computation_delay)
+                self.episode_deviations.append(deviation)
+
         except Exception as e:
             print(f"[CONTROLLER, !] Failed to compute final step reward: {type(e).__name__} - {e}")
             combined_step_reward = 0.0
-        
+
         try:
             print(
                 f"[CONTROLLER, STEP {self.current_step}] Completed. "
@@ -318,7 +338,7 @@ class Controller:
             )
         except Exception:
             pass
-        
+
         # store experience
         try:
             self.step_experiences.append({
@@ -329,7 +349,7 @@ class Controller:
             })
         except Exception as e:
             print(f"[CONTROLLER, !] Failed to store experience: {type(e).__name__} - {e}")
-        
+
         try:
             self.step_rewards.append(combined_step_reward)
             self.agent.epsilon_curve = np.append(
@@ -340,20 +360,20 @@ class Controller:
 
         self.current_step += 1
 
-
     def finalize_episode(self):
         """
         Finalize the episode:
         1. Compute episodic reward
         2. Store all experiences in replay buffer
         3. Train the agent
+        4. Generate plots (periodically)
         """
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"[CONTROLLER, EPISODE {self.current_episode}] Finalizing...")
 
         # Compute episodic reward
         episodic_reward = self.compute_episodic_reward()
-        
+
         print(
             f"[EPISODE {self.current_episode}] "
             f"Steps={len(self.step_rewards)}, "
@@ -386,14 +406,32 @@ class Controller:
               f"Episodic Reward: {episodic_reward:.3f}, "
               f"Epsilon: {self.agent.epsilon:.6f}")
 
+        # Transfer episode metrics to agent for plotting
+        if len(self.episode_latencies) > 0:
+            self.agent.latencies = np.append(self.agent.latencies, self.episode_latencies)
+        if len(self.episode_deviations) > 0:
+            self.agent.deviations = np.append(self.agent.deviations, self.episode_deviations)
+
         episode_end_time = time.time()
         episode_duration = episode_end_time - self.episode_start_time
-        
+
         print(
             f"[CONTROLLER, EPISODE {self.current_episode}] "
             f"Time taken: {episode_duration:.2f} seconds"
         )
         self.episode_start_time = None
+
+        # ============================================================
+        # PLOTTING: Generate plots periodically and at the end
+        # ============================================================
+        should_plot = (
+                (self.current_episode % self.plot_every_n_episodes == 0) or  # Every N episodes
+                (self.current_episode + 1 >= self.expected_episodes)  # Final episode
+        )
+
+        if should_plot:
+            self.generate_plots()
+
         # Checkpoint every N episodes
         # if self.current_episode % 10 == 0:
         #     self.save_checkpoint()
@@ -402,16 +440,138 @@ class Controller:
         self.step_experiences = []
         self.step_rewards = []
         self.episode_waiting_times = []
+        self.episode_latencies = []  # Clear latency tracking
+        self.episode_deviations = []  # Clear deviation tracking
         self.current_chunk = 0
         self.current_step = 0
         self.current_episode += 1
         if self.current_episode >= self.expected_episodes:
             print("[CONTROLLER] ✅ All training episodes finished.")
+            # Generate final comprehensive plots
+            self.generate_final_plots()
             self.training_done.set()
 
+        print(f"{'=' * 60}\n")
 
-        print(f"{'='*60}\n")
+    def generate_plots(self):
+        """
+        Generate all training plots and save metrics summary.
+        Called periodically during training.
+        """
+        episode_str = f"ep{self.current_episode:04d}"
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        save_dir = self.plot_dir / episode_str
 
+        try:
+            # 1. Save comprehensive metrics plot
+            print(f"[CONTROLLER] 📊 Generating plots for episode {self.current_episode}...")
+            self.agent.plot_all_metrics(
+                save_dir=save_dir,
+                show_plot=False  # Don't block execution with plots
+            )
+
+            # 2. Save focused loss plot
+            self.agent.plot_training_loss(
+                save_path=save_dir / f"loss_{timestamp}.png",
+                show_plot=False
+            )
+
+            # 3. Save metrics summary text file
+            self.agent.save_metrics_summary(
+                save_dir / f"metrics_summary_{timestamp}.txt"
+            )
+
+            print(f"[CONTROLLER] ✅ Plots saved to {save_dir}")
+
+        except Exception as e:
+            print(f"[CONTROLLER] ⚠️ Failed to generate plots: {type(e).__name__} - {e}")
+
+    def generate_final_plots(self):
+        """
+        Generate final comprehensive plots at the end of training.
+        These are higher quality and include all data.
+        """
+        print("\n" + "=" * 60)
+        print("[CONTROLLER] 🎨 Generating final training visualizations...")
+        print("=" * 60)
+
+        final_dir = self.plot_dir / "final"
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+
+        try:
+            # 1. Comprehensive metrics dashboard
+            self.agent.plot_all_metrics(
+                save_dir=final_dir,
+                show_plot=False
+            )
+
+            # 2. High-res loss curves
+            self.agent.plot_training_loss(
+                save_path=final_dir / f"final_loss_{timestamp}.png",
+                show_plot=False
+            )
+
+            # 3. Detailed metrics summary
+            self.agent.save_metrics_summary(
+                final_dir / f"final_summary_{timestamp}.txt"
+            )
+
+            # 4. Export training data to CSV for external analysis
+            self.export_training_data(final_dir / f"training_data_{timestamp}.csv")
+
+            print(f"[CONTROLLER] ✅ Final plots saved to {final_dir}")
+            print("=" * 60 + "\n")
+
+        except Exception as e:
+            print(f"[CONTROLLER] ⚠️ Failed to generate final plots: {type(e).__name__} - {e}")
+
+    def export_training_data(self, filepath):
+        """
+        Export all training metrics to CSV for external analysis.
+        """
+        try:
+            # Determine the maximum length
+            max_len = max(
+                len(self.agent.loss),
+                len(self.agent.val_loss),
+                len(self.agent.epsilon_curve),
+                len(self.agent.rewards),
+                len(self.agent.latencies),
+                len(self.agent.deviations),
+                len(self.agent.episode_access_rate),
+                len(self.agent.exploit_or_explore),
+                len(self.agent.prediction_times)
+            )
+
+            # Helper to pad arrays
+            def pad_to_length(arr, length, fill_value=np.nan):
+                if len(arr) < length:
+                    if isinstance(arr, np.ndarray):
+                        return np.concatenate([arr, np.full(length - len(arr), fill_value)])
+                    else:
+                        return list(arr) + [fill_value] * (length - len(arr))
+                return arr
+
+            # Create DataFrame
+            data = {
+                "episode": range(max_len),
+                "loss": pad_to_length(self.agent.loss, max_len),
+                "val_loss": pad_to_length(self.agent.val_loss, max_len),
+                "epsilon": pad_to_length(self.agent.epsilon_curve, max_len),
+                "reward": pad_to_length(self.agent.rewards, max_len),
+                "latency": pad_to_length(self.agent.latencies, max_len),
+                "deviation": pad_to_length(self.agent.deviations, max_len),
+                "access_rate": pad_to_length(self.agent.episode_access_rate, max_len),
+                "strategy": pad_to_length(self.agent.exploit_or_explore, max_len, fill_value=""),
+                "prediction_time": pad_to_length(self.agent.prediction_times, max_len),
+            }
+
+            df = pd.DataFrame(data)
+            df.to_csv(filepath, index=False)
+            print(f"[CONTROLLER] 💾 Training data exported to {filepath}")
+
+        except Exception as e:
+            print(f"[CONTROLLER] ⚠️ Failed to export training data: {type(e).__name__} - {e}")
 
     def save_checkpoint(self):
         """Save model and metrics."""
@@ -435,7 +595,6 @@ class Controller:
             "deviation": self.agent.deviations,
         }).to_csv(metrics_path, index=False)
         print(f"[CONTROLLER] 📊 Metrics logged to {metrics_path}")
-
 
     # ---- Controller loop ----
     def send_to_server(self, chunk):
@@ -464,7 +623,6 @@ class Controller:
             if not hasattr(chunk, "__iter__"):
                 self.episode_start_time = None
                 raise TypeError(f"[CONTROLLER, !] Chunk is not iterable: {type(chunk)}")
-            
 
             for request in chunk:
                 try:
@@ -485,7 +643,7 @@ class Controller:
             if self.current_chunk >= self.chunks_per_episode:
                 try:
                     self.finalize_episode()
-                    
+
                 except Exception as e:
                     # Episode finalization is critical but must not crash controller
                     self.episode_start_time = None
@@ -500,7 +658,6 @@ class Controller:
                 f"[CONTROLLER, !] Fatal error in send_to_server: "
                 f"{type(e).__name__} - {e}"
             )
-
 
     def run(self):
         # ---------------- start receiver ----------------
