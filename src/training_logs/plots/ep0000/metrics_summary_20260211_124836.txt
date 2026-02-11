@@ -1,0 +1,14 @@
+================================================================================
+DQN AGENT TRAINING METRICS SUMMARY
+================================================================================
+
+EXPLORATION vs EXPLOITATION:
+  explore: 30 (100.00%)
+
+REPLAY MEMORY:
+  Current size: 30
+  Max capacity: 2500
+
+EPSILON:
+  Final value: 1.000000
+  Min threshold: 0.000001
