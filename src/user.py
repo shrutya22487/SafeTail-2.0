@@ -1,6 +1,7 @@
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 import numpy as np
+import time as time
 import pandas as pd
 
 # ==================================================
@@ -82,7 +83,7 @@ class Request:
         self.process_id = int(process_id)
         self.combination = combination
         self.deadline = np.asarray([],dtype = float)
-
+        self.arrival_time = time.time()
         self.message_size = int(message_size)
         self.bandwidth = int(bandwidth)
         self.load = np.asarray(load, dtype=int)
