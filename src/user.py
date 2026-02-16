@@ -83,10 +83,12 @@ class Request:
         self.process_id = int(process_id)
         self.combination = combination
         self.deadline = np.asarray([],dtype = float)
-        self.arrival_time = time.time()
+        self.arrival_time = time.time() * 1000.0
+        self.queue_waiting_time = 0.0
         self.message_size = int(message_size)
         self.bandwidth = int(bandwidth)
         self.load = np.asarray(load, dtype=int)
+        self.total_processing_delay = np.asarray([], dtype=float)
         self.step_reward_list = np.asarray([], dtype=float)
 
         self.server_dicts: List[Dict[str, Any]] = [{} for _ in range(6)]

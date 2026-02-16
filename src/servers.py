@@ -208,7 +208,7 @@ class Server:
 
         self.update_active_requests(current_time=current_time)
         if self.num_requests >= MAX_CONCURRENT_REQUESTS:
-            estimated_proc = self.compute_request_time(request)
+            estimated_proc, _ = self.compute_request_time(request)
             return False, "server full", estimated_proc
 
         proc_time, _ = self.compute_request_time(request)

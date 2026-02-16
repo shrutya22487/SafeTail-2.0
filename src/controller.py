@@ -31,6 +31,8 @@ class Controller:
         self.step_experiences = []
         self.step_rewards = []
         self.episode_start_time = None
+        self.average_P_T_values = []  # To track P(T) values for satisfaction calculation
+        self.average_waiting_times = []  # To track average waiting time for each request in the queue per episode
 
         # ---------------- Plotting Configuration ----------------
         self.plot_every_n_episodes = 10  # Generate plots every N episodes
@@ -119,11 +121,70 @@ class Controller:
         num_servers = len(request.server_dicts)
         rewards = np.zeros(num_servers, dtype=float)
 
-        # Decide which servers to evaluate (1-based)
+        # Decide which servers to evaluate (0-based)
         if action_subset is None:
             server_indices = range(num_servers)
         else:
             server_indices = action_subset
+            
+            try:
+            
+                ########################################################################################################
+                # Track P(T) values for satisfaction calculation, to be used in episodic reward. 
+                # Calculated once per request after processing is complete (i.e. after action is taken and request is scheduled on selected servers).
+                # 
+                # For each request with completion time T:
+                #
+                #     P(T) = 1                      if T <= D1        (fully satisfied)
+                #     P(T) = (T - D1) / (D2 - D1)   if D1 < T <= D2   (linearly decreasing satisfaction)
+                #     P(T) = 0                      if T > D2         (not satisfied)
+                #
+                # where:
+                #     D1 = soft deadline
+                #     D2 = hard deadline
+                #     T = minimum observed completion time for this request among all the servers it was assigned to
+                #         + total waiting time in the queue before processing starts
+                #######################################################################################################
+                
+                # D1 = request.deadline[0]  # soft deadline in ms
+                # D2 = request.deadline[1]  # hard deadline in ms
+                
+                # Values for D1 and D2 based on the combination type of the request (e.g., "s" or "d" or "p").
+                deadlines = np.asarray([ [100,400], [30,200] ])  # in ms
+                
+                # request combination type
+                combination = request.combination[0]
+                
+                if(combination == "s"):
+                    D1, D2  = deadlines[0]  # soft and hard deadlines for "s" type requests
+                else:
+                    D1, D2 = deadlines[1]   # soft and hard deadlines for "d" or "p" type requests
+                
+                
+                # minimum observed completion time for this request among all the servers it was assigned to
+                delays = request.total_processing_delay
+                valid_delays = delays[delays >= 0]
+                # keep only valid (processed) delays (removing -1s)
+                min_observed_completion_time = ( np.min(valid_delays) if valid_delays.size > 0 else 0.0 )
+
+                # total waiting time in the queue before processing starts
+                total_queue_waiting_time = request.queue_waiting_time
+                
+                # Total time = completion time + queue waiting time (in ms)
+                T = min_observed_completion_time + total_queue_waiting_time
+
+                if T <= D1:
+                    self.average_P_T_values.append(1)
+                elif D1 < T <= D2:
+                    P_T = (T - D1) / (D2 - D1)
+                    self.average_P_T_values.append(P_T)
+                else:                    
+                    self.average_P_T_values.append(0)
+            
+            except Exception as e:
+                print(f"[CONTROLLER, !] Failed to compute P(T) for satisfaction tracking: {type(e).__name__} - {e}")
+                print(request.deadline)
+                self.average_P_T_values.append(0)  # Default to 0 if we can't compute it
 
         for server_idx in server_indices:
             try:
@@ -173,7 +234,7 @@ class Controller:
                 # ---- Reward ----
                 product = (1 - cm) * (1 - cu) * (1 - gm) * (1 - gu)
 
-                reward = np.log(np.exp(product + 1.0))
+                reward = np.log(product + 1.0)
                 # print(f"[CONTROLLER]...[STEP REWARD] Server {server_idx}: Reward={reward:.6f}")
 
                 # print()
@@ -208,19 +269,39 @@ class Controller:
         """
         gamma = self.agent.reward_gamma
 
+        #############################################################
         # Discounted sum of step rewards
+        #############################################################
         discounted_step_rewards = sum(
             (gamma ** i) * r for i, r in enumerate(self.step_rewards)
         )
-
-        # Degree of satisfaction (simplified: percentage of successful assignments)
-        # calculated as total number of successful requests over total no. of request expected to be completed in an episode
-        # len(self.step_rewards) = number of requests completed in this episode
-        # (constants.total_no_request/constants.no_of_episodes) = expected number of requests per episode
-        omega = len(self.step_rewards) / (constants.total_no_request / constants.no_of_episodes)
-
+        
+        ##############################################################################################
+        # Degree of satisfaction ω
+        ##############################################################################################
+        # Degree of satisfaction ω is computed using a deadline-based piecewise function P(T)
+        #
+        # The overall satisfaction ω is the average satisfaction over all requests:
+        #
+        # omega (ω) = (sum of P(T) over all requests) / (total number of expected requests in episode)
+        ##############################################################################################
+        
+        # sum of P(T) over all requests
+        average_P_T = sum(self.average_P_T_values)
+        
+        # total number of expected requests in episode
+        total_requests_in_episode = constants.total_no_request / constants.no_of_episodes
+        
+        # average satisfaction ω for this episode      
+        omega = average_P_T / total_requests_in_episode if total_requests_in_episode > 0 else 0.0
+        
+        
+        #################################################################################
         # Average waiting time across the episode
-        avg_waiting_time = 0  # Placeholder: implement actual waiting time calculation
+        #################################################################################
+        
+        avg_waiting_time = sum(self.average_waiting_times) / len(self.average_waiting_times) if self.average_waiting_times else 0.0
+        #################################################################################
 
         # Episodic reward
         episodic_reward = discounted_step_rewards + omega - avg_waiting_time
@@ -257,8 +338,8 @@ class Controller:
 
         # update request state
         try:
-            request.load = load
-            request.total_delay = []
+            request.load = np.array(load)
+            request_total_delay = []
             combined_strs = []
         except Exception as e:
             print(f"[CONTROLLER, !] Failed to update request state: {type(e).__name__} - {e}")
@@ -267,15 +348,19 @@ class Controller:
         for i in range(self.num_servers):
             try:
                 delay, combined_str = self.server_list[i].compute_request_time(request)
-                request.total_delay.append(delay)
+                request_total_delay.append(delay)
                 combined_strs.append(combined_str)
             except Exception as e:
                 print(
                     f"[CONTROLLER, !] Error computing request time "
                     f"for server {i + 1}: {type(e).__name__} - {e}"
                 )
-                request.total_delay.append(float("inf"))
+                request_total_delay.append(float(-1))  # Use -1 to indicate failure to compute delay for this server
                 combined_strs.append(None)
+        
+        # Store estimated total_delay in request for each server for prediction of RL model
+        request.total_processing_delay = np.array(request_total_delay)
+        request_total_delay = [float(-1)] * self.num_servers # reset to later use for tracking observed latency after action is taken (i.e. when request is scheduled and completed)
 
         # Update request state to add data from servers
         for i in range(len(combined_strs)):
@@ -302,16 +387,31 @@ class Controller:
             print(f"[CONTROLLER, !] Agent failed to produce action: {type(e).__name__} - {e}")
             return
 
+        # track the waiting time in the queue before request starts processing
+        try:
+            request.queue_waiting_time = time.time() * 1000.0 - request.arrival_time  # in ms
+            self.average_waiting_times.append(request.queue_waiting_time) 
+        except Exception as e:
+            print(f"[CONTROLLER, !] Failed to compute waiting time: {type(e).__name__} - {e}")
+            request.queue_waiting_time = 0.0  
+        
         # assign request
         for i in action_subset:
             try:
-                self.server_list[i].schedule_request(request)
+                _, _, processing_time = self.server_list[i].schedule_request(request)
+                # Update observed processing time for this server (in ms)
+                request_total_delay[i] = float(processing_time) * 1000.0 
+                
             except Exception as e:
                 print(
                     f"[CONTROLLER, !] Failed to schedule request on server {i}: "
                     f"{type(e).__name__} - {e}"
                 )
+                print(processing_time)
 
+        # Store actual total_delay in request for each server for reward calculation and tracking
+        request.total_processing_delay = np.array(request_total_delay)
+        
         # compute reward and track latency metrics
         try:
             final_step_reward_list = self.compute_step_reward(request, action_subset)
@@ -319,8 +419,8 @@ class Controller:
 
             # Track observed latency (minimum among selected servers)
             if len(action_subset) > 0 and hasattr(request, 'total_delay'):
-                observed_latency = min(request.total_delay[i] for i in action_subset
-                                       if i < len(request.total_delay))
+                observed_latency = min(request.total_processing_delay[i] for i in action_subset
+                                       if i < len(request.total_processing_delay))
                 self.episode_latencies.append(observed_latency)
 
                 # Track deviation from median
@@ -428,6 +528,8 @@ class Controller:
                 (self.current_episode % self.plot_every_n_episodes == 0) or  # Every N episodes
                 (self.current_episode + 1 >= self.expected_episodes)  # Final episode
         )
+        
+        should_plot = False # --- IGNORE ---
 
         if should_plot:
             self.generate_plots()
