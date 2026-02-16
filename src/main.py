@@ -64,14 +64,26 @@ def request_factory(i: int):
 
     # -------- safest defaults --------
     server_count = 5
+    # added the deadlines these are in milli- second ms
+    
+    deadlines = np.asarray([
+        [100,400],
+        [30,200]
+    ])
 
     try:
         # ---------------- combination ----------------
         try:
             combination = random.choice(["s", "p", "d"])
+            if(combination == "s"):
+                deadline  = deadlines[0]
+            else:
+                deadline = deadlines[1]
+        
         except Exception:
             # absolute fallback
             combination = "s"
+            deadline = deadlines[0]
 
         # ---------------- construct request ----------------
         req = user.Request(
@@ -82,6 +94,7 @@ def request_factory(i: int):
             message_size=1024,
             bandwidth=20,
             load=np.zeros(server_count, dtype=int),
+            deadline = deadline
         )
 
         return req
@@ -110,6 +123,7 @@ def request_factory(i: int):
                 message_size=np.zeros(server_count, dtype=float),
                 bandwidth=np.zeros(server_count, dtype=float),
                 load=np.zeros(server_count, dtype=int),
+                deadline = deadlines[0]
             )
         except Exception:
             # ==================================================
@@ -121,6 +135,7 @@ def request_factory(i: int):
                     process_id=int(i),
                     combination="s",
                     arrival_time=time.time() * 1000.0,
+                    deadline = deadlines[0]
                 )
             except Exception:
                 # ==================================================

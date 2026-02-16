@@ -76,10 +76,12 @@ class Request:
         message_size: int,
         bandwidth:int,
         load: np.ndarray,
+        deadline: np.array
     ):
         self.request_id = int(request_id)
         self.process_id = int(process_id)
         self.combination = combination
+        self.deadline = np.asarray([],dtype = float)
 
         self.message_size = int(message_size)
         self.bandwidth = int(bandwidth)
