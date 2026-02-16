@@ -46,7 +46,7 @@ class Controller:
             alpha=constants.alpha,
             reward_gamma=constants.discount_rate,
             epsilon=1.0,
-            epsilon_min=0.000001,
+            epsilon_min=0.05,
             epsilon_decay=constants.gamma_decay,
             batch_size=constants.batch_size,
             beta=constants.beta,
@@ -529,7 +529,8 @@ class Controller:
                 (self.current_episode + 1 >= self.expected_episodes)  # Final episode
         )
         
-        should_plot = False # --- IGNORE ---
+        # UNCOMMENT BELOW TO ENABLE PLOTTING DURING TRAINING
+        # should_plot = False # --- IGNORE ---
 
         if should_plot:
             self.generate_plots()
