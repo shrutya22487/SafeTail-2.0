@@ -530,7 +530,7 @@ class Controller:
         )
         
         # UNCOMMENT BELOW TO ENABLE PLOTTING DURING TRAINING
-        # should_plot = False # --- IGNORE ---
+        should_plot = False # --- IGNORE ---
 
         if should_plot:
             self.generate_plots()
@@ -548,6 +548,8 @@ class Controller:
         self.current_chunk = 0
         self.current_step = 0
         self.current_episode += 1
+        self.average_P_T_values = []  # Clear P(T) tracking for next episode
+        self.average_waiting_times = []  # Clear waiting time tracking for next episode
         if self.current_episode >= self.expected_episodes:
             print("[CONTROLLER] ✅ All training episodes finished.")
             # Generate final comprehensive plots
