@@ -19,6 +19,9 @@ class Controller:
 
         self.lock = threading.Lock()
         self.receiver_queue = None  # attached externally
+        
+        # Values for D1 and D2 based on the combination type of the request (e.g., "s" or "d" or "p").
+        self.deadlines = np.asarray([ [100,400], [30,200] ])  # in ms
 
         # ---------------- Episode / Step tracking ----------------
         self.chunks_per_episode = chunks_per_episode
@@ -33,6 +36,13 @@ class Controller:
         self.episode_start_time = None
         self.average_P_T_values = []  # To track P(T) values for satisfaction calculation
         self.average_waiting_times = []  # To track average waiting time for each request in the queue per episode
+        # Tracking for request completion counts (for use in episodic reward shaping)
+        self.request_s_done = 0
+        self.request_s_total = 0
+        self.request_d_done = 0
+        self.request_d_total = 0
+        self.request_p_done = 0
+        self.request_p_total = 0
 
         # ---------------- Plotting Configuration ----------------
         self.plot_every_n_episodes = 10  # Generate plots every N episodes
@@ -131,7 +141,8 @@ class Controller:
             
                 ########################################################################################################
                 # Track P(T) values for satisfaction calculation, to be used in episodic reward. 
-                # Calculated once per request after processing is complete (i.e. after action is taken and request is scheduled on selected servers).
+                # Calculated once per request after processing is complete 
+                # (i.e. after action is taken and request is scheduled on selected servers).
                 # 
                 # For each request with completion time T:
                 #
@@ -149,16 +160,13 @@ class Controller:
                 # D1 = request.deadline[0]  # soft deadline in ms
                 # D2 = request.deadline[1]  # hard deadline in ms
                 
-                # Values for D1 and D2 based on the combination type of the request (e.g., "s" or "d" or "p").
-                deadlines = np.asarray([ [100,400], [30,200] ])  # in ms
-                
                 # request combination type
                 combination = request.combination[0]
                 
                 if(combination == "s"):
-                    D1, D2  = deadlines[0]  # soft and hard deadlines for "s" type requests
+                    D1, D2  = self.deadlines[0]  # soft and hard deadlines for "s" type requests
                 else:
-                    D1, D2 = deadlines[1]   # soft and hard deadlines for "d" or "p" type requests
+                    D1, D2 = self.deadlines[1]   # soft and hard deadlines for "d" or "p" type requests
                 
                 
                 # minimum observed completion time for this request among all the servers it was assigned to
@@ -172,7 +180,8 @@ class Controller:
                 
                 # Total time = completion time + queue waiting time (in ms)
                 T = min_observed_completion_time + total_queue_waiting_time
-
+                
+                print(f"[CONTROLLER, P(T) CALC] Req {request.request_id}: T={T:.2f} ms, D1={D1} ms, D2={D2} ms")
                 if T <= D1:
                     self.average_P_T_values.append(1)
                 elif D1 < T <= D2:
@@ -180,6 +189,24 @@ class Controller:
                     self.average_P_T_values.append(P_T)
                 else:                    
                     self.average_P_T_values.append(0)
+                    
+                #######################################################################################################
+                
+                # Track request completion counts for different combination types (for use in episodic reward shaping)
+                if(combination == "s"):
+                    self.request_s_total += 1
+                    if T <= D2:
+                        self.request_s_done += 1
+                elif(combination == "d"):
+                    self.request_d_total += 1
+                    if T <= D2:
+                        self.request_d_done += 1
+                elif(combination == "p"):
+                    self.request_p_total += 1
+                    if T <= D2:
+                        self.request_p_done += 1
+                        
+                #######################################################################################################
             
             except Exception as e:
                 print(f"[CONTROLLER, !] Failed to compute P(T) for satisfaction tracking: {type(e).__name__} - {e}")
@@ -301,13 +328,23 @@ class Controller:
         #################################################################################
         
         avg_waiting_time = sum(self.average_waiting_times) / len(self.average_waiting_times) if self.average_waiting_times else 0.0
+        
+        # sum of (Percentage of s done) * D1 + (Percentage of d done) * D1 + (Percentage of p done) * D1
+        wait_time_denominator = 0.0
+        if self.request_s_total > 0:
+            wait_time_denominator += (self.request_s_done/self.request_s_total)*100
+        if self.request_d_total > 0:
+            wait_time_denominator += (self.request_d_done/self.request_d_total)*30
+        if self.request_p_total > 0:
+            wait_time_denominator += (self.request_p_done/self.request_p_total)*30
+
         #################################################################################
 
         # Episodic reward
-        episodic_reward = discounted_step_rewards + omega - avg_waiting_time
+        episodic_reward = (discounted_step_rewards + omega - avg_waiting_time/wait_time_denominator) if wait_time_denominator > 0 else (discounted_step_rewards + omega)
 
         print(f"[CONTROLLER, EPISODE REWARD] Discounted steps: {discounted_step_rewards:.3f}, "
-              f"Satisfaction: {omega:.3f}, Avg wait: {avg_waiting_time:.3f}, "
+              f"Satisfaction: {omega:.3f}, Avg wait: {avg_waiting_time:.3f} ms, "
               f"R_episode: {episodic_reward:.3f}")
 
         return episodic_reward
@@ -324,7 +361,7 @@ class Controller:
 
         try:
             load = self.find_free_servers()
-            num_free = sum(l != 1e9 for l in load)
+            num_free = sum(l != -1 for l in load)
         except Exception as e:
             print(f"[CONTROLLER, !] Failed to find free servers: {type(e).__name__} - {e}")
             return
@@ -550,6 +587,12 @@ class Controller:
         self.current_episode += 1
         self.average_P_T_values = []  # Clear P(T) tracking for next episode
         self.average_waiting_times = []  # Clear waiting time tracking for next episode
+        self.request_s_done = 0
+        self.request_s_total = 0
+        self.request_d_done = 0
+        self.request_d_total = 0
+        self.request_p_done = 0
+        self.request_p_total = 0
         if self.current_episode >= self.expected_episodes:
             print("[CONTROLLER] ✅ All training episodes finished.")
             # Generate final comprehensive plots

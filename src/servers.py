@@ -257,7 +257,7 @@ class Server:
         if(self.num_requests < MAX_CONCURRENT_REQUESTS):
             return self.num_requests
         else:
-            return 1e9
+            return -1
 
     def time_until_next_free(self, current_time: float = None):
         if current_time is None:
