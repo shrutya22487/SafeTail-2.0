@@ -207,6 +207,12 @@ class Receiver:
                         except Exception as e:
                             print(f"[RECEIVER, !] Failed to save chunk from {addr}: {e}")
 
+                    # ---- Update arrival time when entering queue ----
+                    now_ms = time.time() * 1000.0
+                    for req in arr:
+                        req.arrival_time = now_ms
+                        
+
                     # ---- Dispatch to controller ----
                     try:
                         self.controller.send_to_server(arr)
