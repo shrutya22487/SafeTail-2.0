@@ -1,0 +1,21 @@
+================================================================================
+DQN AGENT TRAINING METRICS SUMMARY
+================================================================================
+
+LATENCIES:
+  Mean: 0.211902
+  Std:  0.256628
+  Min:  0.056287
+  Max:  1.364837
+  Median Baseline: 0.048000
+
+EXPLORATION vs EXPLOITATION:
+  explore: 30 (100.00%)
+
+REPLAY MEMORY:
+  Current size: 30
+  Max capacity: 2500
+
+EPSILON:
+  Final value: 1.000000
+  Min threshold: 0.000001

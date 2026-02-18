@@ -565,9 +565,7 @@ class Controller:
                 (self.current_episode % self.plot_every_n_episodes == 0) or  # Every N episodes
                 (self.current_episode + 1 >= self.expected_episodes)  # Final episode
         )
-        
-        # UNCOMMENT BELOW TO ENABLE PLOTTING DURING TRAINING
-        should_plot = False # --- IGNORE ---
+
 
         if should_plot:
             self.generate_plots()

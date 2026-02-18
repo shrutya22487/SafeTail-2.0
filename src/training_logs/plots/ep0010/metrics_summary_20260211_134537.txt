@@ -1,0 +1,41 @@
+================================================================================
+DQN AGENT TRAINING METRICS SUMMARY
+================================================================================
+
+TRAINING LOSS:
+  Mean: 29.484356
+  Std:  3.506815
+  Min:  25.552540
+  Max:  34.708508
+  Final: 32.602062
+
+VALIDATION LOSS:
+  Mean: 33.813191
+  Std:  8.952068
+  Min:  23.962921
+  Max:  46.282707
+  Final: 46.282707
+
+REWARDS:
+  Mean: 6.035039
+  Std:  0.052457
+  Min:  5.963785
+  Max:  6.108503
+
+LATENCIES:
+  Mean: 0.234938
+  Std:  0.268748
+  Min:  0.055501
+  Max:  1.597492
+  Median Baseline: 0.048000
+
+EXPLORATION vs EXPLOITATION:
+  explore: 330 (100.00%)
+
+REPLAY MEMORY:
+  Current size: 330
+  Max capacity: 2500
+
+EPSILON:
+  Final value: 0.998740
+  Min threshold: 0.000001
