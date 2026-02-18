@@ -455,7 +455,7 @@ class Controller:
             combined_step_reward = np.mean(final_step_reward_list)
 
             # Track observed latency (minimum among selected servers)
-            if len(action_subset) > 0 and hasattr(request, 'total_delay'):
+            if len(action_subset) > 0 and hasattr(request, 'total_processing_delay'):
                 observed_latency = min(request.total_processing_delay[i] for i in action_subset
                                        if i < len(request.total_processing_delay))
                 self.episode_latencies.append(observed_latency)
