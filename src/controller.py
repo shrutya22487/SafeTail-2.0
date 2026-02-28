@@ -45,8 +45,8 @@ class Controller:
         self.request_p_total = 0
 
         # ---------------- Plotting Configuration ----------------
-        self.plot_every_n_episodes = 10  # Generate plots every N episodes
-        self.plot_dir = Path("training_logs/plots")
+        self.plot_every_n_episodes = 20  # Generate plots every N episodes
+        self.plot_dir = Path(constants.training_log_folder + "/plots")
         self.plot_dir.mkdir(parents=True, exist_ok=True)
 
         # ---------------- Agent ----------------
@@ -56,7 +56,7 @@ class Controller:
             alpha=constants.alpha,
             reward_gamma=constants.discount_rate,
             epsilon=1.0,
-            epsilon_min=0.05,
+            epsilon_min=constants.epsilon_min,
             epsilon_decay=constants.gamma_decay,
             batch_size=constants.batch_size,
             beta=constants.beta,
@@ -72,9 +72,57 @@ class Controller:
         self.episode_latencies = []  # Track latencies per episode
         self.episode_deviations = []  # Track deviations per episode
 
+        latency_log_path = Path(constants.training_log_folder + "/plots") / ".." / "latency_log.txt"
+        latency_log_path = latency_log_path.resolve()
+        with open(latency_log_path, "w") as f:
+            f.write("LATENCY LOG\n")
+            f.write("=" * 100 + "\n")
+            f.write(f"{'[EP | STEP]':<20} {'Req':<12} {'Type':<6} {'Servers':<15} "
+                    f"{'Latency(ms)':<14} {'QueueWait(ms)':<16} {'Total(ms)':<12} "
+                    f"{'D1':<8} {'D2':<8} {'Satisfaction':<12} Arrival\n")
+            f.write("=" * 100 + "\n")
     # ------------------------------------------------------------
     # Utility
     # ------------------------------------------------------------
+    def log_latency_to_file(self, request, observed_latency, action_subset, episode, step):
+        """
+        Append latency + request details to a structured text log file.
+        """
+        log_path = self.plot_dir.parent / "latency_log.txt"
+
+        try:
+            combination = getattr(request, 'combination', ['?'])[0]
+            request_id = getattr(request, 'request_id', 'unknown')
+            arrival = getattr(request, 'arrival_time', 'N/A')
+            queue_wait = getattr(request, 'queue_waiting_time', -1.0)
+
+            # Deadline thresholds for reference
+            D1, D2 = self.deadlines[0] if combination == "s" else self.deadlines[1]
+
+            # Satisfaction label
+            if observed_latency <= D1:
+                satisfaction = "FULL"
+            elif observed_latency <= D2:
+                satisfaction = "PARTIAL"
+            else:
+                satisfaction = "MISSED"
+
+            with open(log_path, "a") as f:
+                f.write(
+                    f"[EP {episode:04d} | STEP {step:04d}] "
+                    f"Req={request_id} | "
+                    f"Type={combination} | "
+                    f"Servers={list(action_subset)} | "
+                    f"Latency={observed_latency:.3f} ms | "
+                    f"QueueWait={queue_wait:.3f} ms | "
+                    f"Total={observed_latency + queue_wait:.3f} ms | "
+                    f"D1={D1} ms | D2={D2} ms | "
+                    f"Satisfaction={satisfaction} | "
+                    f"Arrival={arrival}\n"
+                )
+        except Exception as e:
+            print(f"[CONTROLLER] ⚠️ Failed to write latency log: {type(e).__name__} - {e}")
+
     def find_free_servers(self):
         now = time.time()
         load = [s.check_server_availability(now) for s in self.server_list]
@@ -463,6 +511,13 @@ class Controller:
                 # Track deviation from median
                 deviation = abs(observed_latency - self.agent.median_computation_delay)
                 self.episode_deviations.append(deviation)
+                self.log_latency_to_file(
+                    request=request,
+                    observed_latency=observed_latency,
+                    action_subset=action_subset,
+                    episode=self.current_episode,
+                    step=self.current_step
+                )
 
         except Exception as e:
             print(f"[CONTROLLER, !] Failed to compute final step reward: {type(e).__name__} - {e}")

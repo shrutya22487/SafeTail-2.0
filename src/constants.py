@@ -1,19 +1,30 @@
-no_of_sensors = 1
 max_bandwidth = 20
-median_computation_delay = 0.048
+median_computation_delay = 0.05
 total_no_request = 100
 chunk_size = 5
 no_of_chunk= int(total_no_request/chunk_size)
 episode_size = 2
 no_of_burst = 500
 no_of_episodes = int(no_of_chunk/episode_size)
-max_load = 5 # make it 20
+learning_rate =  1e-3
+gamma_decay = 1.8e-4
+epsilon_min = 0.07
+min_burst = 2
+max_burst = 6
+min_interval = 0.2
+max_interval = 0.8
+jitter = 0.02
+lr_decay_rate = 0.995
+lr_min = 1e-5
+training_log_folder = "training_logs"
+
+
+no_of_sensors = 1
+max_load = 5
 beta = 5 # Number of edge servers.
 alpha = 0.005 # Reward scaling factor.
-learning_rate =  1e-05
 discount_rate = 0.9
-gamma_decay = 1.8e-04
-batch_size = 128
+batch_size = 32
 nS = 1*beta + 1 # Number of state features per step.
 nA = 2**beta - 1 # Number of possible actions (subsets of servers).
 exploit_or_explore = []

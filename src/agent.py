@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 import traceback
 from pathlib import Path
+
+from numpy.doc.constants import constants
 from tensorflow.keras import layers
 import servers
 import user
@@ -29,7 +31,6 @@ def get_subsets(fullset):
                 subset.append(listrep[k])
         subsets.append(np.array(subset))  # convert each subset to np.array
     return np.array(subsets[1:], dtype=object)  # return numpy array of subsets
-
 
 def request_to_state_array(request_obj, remove_nan=True):
     """
@@ -110,13 +111,12 @@ def request_to_state_array(request_obj, remove_nan=True):
         traceback.print_exc()
         return np.full(1, -1.0, dtype=float)
 
-
 class DQNAgent:
     def __init__(self, states, actions, alpha, reward_gamma, epsilon,
                  epsilon_min, epsilon_decay, batch_size, beta,
                  median_computation_delay, learning_rate, task, epochs, request: user.Request,
-                 server_list: list[servers.Server]
-                 , encoder_output_dim=32):
+                 server_list: list[servers.Server], lr_decay_rate=0.995, lr_min=1e-5,
+                 ):
         self.nS = states
         self.nA = actions
         self.memory = deque([], maxlen=2500)
@@ -132,6 +132,8 @@ class DQNAgent:
         self.learning_rate = learning_rate
         self.task = task
         self.epochs = epochs
+        self.lr_decay_rate = constants.lr_decay_rate
+        self.lr_min = constants.lr_min
         # Encoder is now integrated into the model (no separate encoder instance)
         # Build integrated Encoder + DQN model
         self.model = self.build_model()
@@ -159,6 +161,13 @@ class DQNAgent:
         # Clear file once at start
         with open(self.replay_dump_file, "w") as f:
             f.write("REPLAY DEBUG LOG\n")
+
+    def decay_learning_rate(self):
+        """Exponentially decay learning rate after each replay."""
+        current_lr = float(self.model.optimizer.learning_rate)
+        new_lr = max(current_lr * self.lr_decay_rate, self.lr_min)
+        self.model.optimizer.learning_rate.assign(new_lr)
+        return new_lr
 
     # Helper function to dump replay batch for debugging
     def dump_replay_batch(
@@ -296,7 +305,7 @@ class DQNAgent:
         # Reshape to (batch, max_length, 1) for model input
         states_padded = states_padded.reshape(batch_size, -1, 1)
         next_states_padded = next_states_padded.reshape(batch_size, -1, 1)
-        # 🔥 DUMP REAL INPUTS HERE: to check if there are any nan values in the state representation (WILL CAUSE PROBLEMS LATER)
+
         if self.debug_replay_dump:
             self.dump_replay_batch(
                 states=states,
@@ -326,14 +335,13 @@ class DQNAgent:
         # Decay epsilon
         if self.epsilon > self.epsilon_min:
             self.epsilon -= self.epsilon_decay
+
+        self.decay_learning_rate()
+
         self.loss = np.append(self.loss, hist.history['loss'][0])
         self.val_loss = np.append(self.val_loss, hist.history['val_loss'][0])
-
-        # Track rewards for plotting (use mean of batch rewards)
         self.rewards = np.append(self.rewards, np.mean(rewards))
 
-    # TODO:
-    # @Shrutya :  verify usage of .compute_request_time() instead of the .get_delay() method.
     def get_min_delay(self, request, servers_to_be_queried):
         """
         Query the servers and get the minimum delay among them.
@@ -343,11 +351,6 @@ class DQNAgent:
             min_delay = min(min_delay, self.server_list[server].compute_request_time(request))
         return min_delay
 
-    # TODO:
-    # @Shrutya :  verify usage of .compute_request_time() instead of the .get_delay() method.
-    #
-    # NOTE: This method is NO LONGER USED with step/episodic reward architecture.
-    # Kept for backward compatibility. Rewards are now computed in controller.py
     def reward(self, action, request):
         """
         DEPRECATED: Used to compute min latency among chosen servers.
