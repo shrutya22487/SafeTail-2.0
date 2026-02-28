@@ -328,7 +328,7 @@ class DQNAgent:
         hist = self.model.fit(
             states_padded,
             targets,
-            epochs=self.epochs,
+            epochs=constants.epochs,
             verbose=1,
             validation_split=0.2
         )

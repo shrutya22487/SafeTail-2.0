@@ -17,7 +17,7 @@ jitter = 0.02
 lr_decay_rate = 0.995
 lr_min = 1e-5
 training_log_folder = "training_logs"
-
+epochs = 3
 
 no_of_sensors = 1
 max_load = 5

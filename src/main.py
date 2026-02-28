@@ -8,13 +8,11 @@ This request_factory constructs user.Request objects using the correct signature
 
 import time
 from types import SimpleNamespace
-
 from receiver import Receiver
 from sender_bursts import SenderBursts
 import user
 from controller import Controller
 import constants
-import os
 import random
 import pandas as pd
 from pathlib import Path
@@ -23,7 +21,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
 
 # ---- load server CSVs once (NOT per request) ----
 BASE_DIR = Path(__file__).resolve().parent.parent  # go from src/ -> project root
@@ -36,6 +33,19 @@ SERVER_CSVS = [
     DATA_DIR / "server4.csv",
     DATA_DIR / "server5.csv",
 ]
+import inspect
+
+def print_constants(module):
+    print("\n" + "=" * 50)
+    print(f"  CONSTANTS ({module.__name__})")
+    print("=" * 50)
+    for name, value in inspect.getmembers(module):
+        # Skip built-ins, modules, and callables
+        if not name.startswith("_") and not inspect.ismodule(value) and not callable(value):
+            print(f"  {name:<30} = {value}")
+    print("=" * 50 + "\n")
+
+print_constants(constants)
 
 SERVER_DFS = []
 for p in SERVER_CSVS:
@@ -154,16 +164,16 @@ def main():
 
     # ---------------- create sender ----------------
     sender = SenderBursts(
-        arr=None,               # auto-generate using request_factory
+        arr=None,
         sample_count=constants.total_no_request,        # total requests
         chunk_size=constants.chunk_size,          # requests per chunk
         bursts=constants.no_of_burst,
-        min_burst=1,
-        max_burst=2,
-        min_interval=0.2,
-        max_interval=0.8,
-        jitter=0.02,
-        request_factory=request_factory,   # use correct Request constructor
+        min_burst=constants.min_burst,
+        max_burst=constants.max_burst,
+        min_interval=constants.min_interval,
+        max_interval=constants.max_interval,
+        jitter=constants.jitter,
+        request_factory=request_factory,
         host="127.0.0.1",
         port=6000,
     )
