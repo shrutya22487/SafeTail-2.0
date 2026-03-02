@@ -479,13 +479,14 @@ class Controller:
         except Exception as e:
             print(f"[CONTROLLER, !] Failed to compute waiting time: {type(e).__name__} - {e}")
             request.queue_waiting_time = 0.0  
-        
+        l = []
         # assign request
         for i in action_subset:
             try:
-                _, _, processing_time = self.server_list[i].schedule_request(request)
+                _, _, processing_time, combined_str = self.server_list[i].schedule_request(request)
                 # Update observed processing time for this server (in ms)
-                request_total_delay[i] = float(processing_time) * 1000.0 
+                request_total_delay[i] = float(processing_time) * 1000.0
+                l.append([request_total_delay[i], combined_str])
                 
             except Exception as e:
                 print(
@@ -504,8 +505,8 @@ class Controller:
 
             # Track observed latency (minimum among selected servers)
             if len(action_subset) > 0 and hasattr(request, 'total_processing_delay'):
-                observed_latency = min(request.total_processing_delay[i] for i in action_subset
-                                       if i < len(request.total_processing_delay))
+                observed_latency = sorted(l)[0][0]
+                request.combination = sorted(l)[0][1]
                 self.episode_latencies.append(observed_latency)
 
                 # Track deviation from median

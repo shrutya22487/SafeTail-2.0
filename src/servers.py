@@ -224,7 +224,7 @@ class Server:
             time.sleep(proc_time)
             self.update_active_requests(current_time=time.time())
 
-        return True, finish_time, proc_time
+        return True, finish_time, proc_time, combined_str
 
     # ---------- Remaining helpers ----------
     def update_active_requests(self, current_time: float = None):
