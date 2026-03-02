@@ -39,7 +39,6 @@ def _get_server_df(server_idx: int) -> pd.DataFrame:
     _CSV_CACHE[server_idx] = df
     return df
 
-
 def _to_float_array(val) -> np.ndarray:
     """
     Robustly convert CSV cell values into a float numpy array.
@@ -56,7 +55,6 @@ def _to_float_array(val) -> np.ndarray:
             return np.asarray([], dtype=float)
 
     return np.asarray([], dtype=float)
-
 
 class Request:
     """

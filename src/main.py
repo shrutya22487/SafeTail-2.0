@@ -100,7 +100,6 @@ def request_factory(i: int):
             request_id=int(i),
             process_id=int(i),
             combination=combination,
-
             message_size=1024,
             bandwidth=20,
             load=np.zeros(server_count, dtype=int),

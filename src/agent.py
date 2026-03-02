@@ -7,8 +7,7 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 import traceback
 from pathlib import Path
-
-from numpy.doc.constants import constants
+import constants
 from tensorflow.keras import layers
 import servers
 import user

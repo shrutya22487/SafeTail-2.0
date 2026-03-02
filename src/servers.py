@@ -88,24 +88,13 @@ class Server:
             start = ar['start_time']
             finish = ar['finish_time']
             proc = ar['proc_time']
-            print(f"  Start: {start:.2f}, Finish: {finish:.2f}, Proc Time: {proc:.6f}")
+            print(f" Combination: {ar['request'].combination}, Start: {start:.2f}, Finish: {finish:.2f}, Proc Time: {proc:.6f}")
 
     def _get_propogation_delay(self):
-        return random.choice(self.propagation_delays[self.server_index - 1])
+        return random.choice(self.propagation_delays[self.server_index - 1]) / 10
 
     def _get_tramission_delay(self, message_size_bytes, upload_bandwidth_kbps, download_bandwidth_kbps):
-        """
-        message_size_bytes: bytes
-        bandwidths: kbps (kilobits per second)
-        Convert to bits and compute (message_bits / uplink_bits_per_sec) + (message_bits / downlink_bits_per_sec)
-        """
-        message_bits = 8 * float(message_size_bytes)
-        uplink_bps = float(upload_bandwidth_kbps) * 1000.0
-        downlink_bps = float(download_bandwidth_kbps) * 1000.0
-        # avoid division by zero
-        if uplink_bps <= 0 or downlink_bps <= 0:
-            return float('inf')
-        return (message_bits / uplink_bps) + (message_bits / downlink_bps)
+        return random.choice([18.5, 19.2, 20, 21.5, 22]) / 1000
 
     def _collect_visible_types(self):
         sorted_active = sorted(self.active_requests, key=lambda ar: ar['start_time'])
@@ -196,6 +185,11 @@ class Server:
         first_letter, combined_str = self._choose_first_letter_for_regressor(request)
         computation_delay_for_node = self._predict_using_letter(first_letter, combined_str)
 
+        print("propagation_delay_for_node: ", propagation_delay_for_node *1000)
+        print("transmission_delay_for_node: ", tramission_delay_for_node*1000)
+        print("computation_delay_for_node: ", computation_delay_for_node*1000)
+        # print("computation_delay_for_node: ", computation_delay_for_node*1000)
+
         total_delay = propagation_delay_for_node + tramission_delay_for_node + computation_delay_for_node
         return total_delay, combined_str
 
@@ -211,9 +205,11 @@ class Server:
             estimated_proc, _ = self.compute_request_time(request)
             return False, "server full", estimated_proc
 
-        proc_time, _ = self.compute_request_time(request)
+        proc_time, combined_str = self.compute_request_time(request)
         start_time = current_time
         finish_time = start_time + proc_time
+
+        request.combination = combined_str
 
         self.requests.append(request)
         self.active_requests.append({
