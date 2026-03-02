@@ -91,7 +91,7 @@ class Controller:
         log_path = self.plot_dir.parent / "latency_log.txt"
 
         try:
-            combination = getattr(request, 'combination', ['?'])[0]
+            combination = getattr(request, 'combination', ['?'])
             request_id = getattr(request, 'request_id', 'unknown')
             arrival = getattr(request, 'arrival_time', 'N/A')
             queue_wait = getattr(request, 'queue_waiting_time', -1.0)
