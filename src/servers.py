@@ -185,9 +185,9 @@ class Server:
         first_letter, combined_str = self._choose_first_letter_for_regressor(request)
         computation_delay_for_node = self._predict_using_letter(first_letter, combined_str)
 
-        print("propagation_delay_for_node: ", propagation_delay_for_node *1000)
-        print("transmission_delay_for_node: ", tramission_delay_for_node*1000)
-        print("computation_delay_for_node: ", computation_delay_for_node*1000)
+        # print("propagation_delay_for_node: ", propagation_delay_for_node *1000)
+        # print("transmission_delay_for_node: ", tramission_delay_for_node*1000)
+        # print("computation_delay_for_node: ", computation_delay_for_node*1000)
         # print("computation_delay_for_node: ", computation_delay_for_node*1000)
 
         total_delay = propagation_delay_for_node + tramission_delay_for_node + computation_delay_for_node
