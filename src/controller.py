@@ -243,16 +243,16 @@ class Controller:
                 # Track request completion counts for different combination types (for use in episodic reward shaping)
                 if(combination == "s"):
                     self.request_s_total += 1
-                    if T <= D2:
-                        self.request_s_done += 1
+                    # if T <= D2:
+                    #     self.request_s_done += 1
                 elif(combination == "d"):
                     self.request_d_total += 1
-                    if T <= D2:
-                        self.request_d_done += 1
+                    # if T <= D2:
+                    #     self.request_d_done += 1
                 elif(combination == "p"):
                     self.request_p_total += 1
-                    if T <= D2:
-                        self.request_p_done += 1
+                    # if T <= D2:
+                    #     self.request_p_done += 1
                         
                 #######################################################################################################
             
@@ -830,7 +830,19 @@ class Controller:
                 try:
                     with self.lock:
                         # Process this chunk as one STEP
+                        
                         self.process_step(request)
+                        
+                        # request combination type
+                        combination = request.combination[0]
+                        # Track request completion counts for different combination types (for use in episodic reward shaping)
+                        if(combination == "s"):
+                            self.request_s_done += 1
+                        elif(combination == "d"):
+                            self.request_d_done += 1
+                        elif(combination == "p"):
+                            self.request_p_done += 1
+                            
                 except Exception as e:
                     # Fail-soft: skip bad request, continue episode
                     print(
