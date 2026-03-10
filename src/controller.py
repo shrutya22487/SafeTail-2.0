@@ -19,9 +19,9 @@ class Controller:
 
         self.lock = threading.Lock()
         self.receiver_queue = None  # attached externally
-        
+
         # Values for D1 and D2 based on the combination type of the request (e.g., "s" or "d" or "p").
-        self.deadlines = np.asarray([ [100,400], [30,200] ])  # in ms
+        self.deadlines = np.asarray([[100, 400], [30, 200]])  # in ms
 
         # ---------------- Episode / Step tracking ----------------
         self.chunks_per_episode = chunks_per_episode
@@ -72,6 +72,12 @@ class Controller:
         self.episode_latencies = []  # Track latencies per episode
         self.episode_deviations = []  # Track deviations per episode
 
+        # ---------------- Post-epsilon-min phase ----------------
+        self.epsilon_min_reached = False  # flag: epsilon has hit its floor
+        self.post_epsilon_steps = 0  # steps counted after epsilon_min reached
+        self.post_epsilon_steps_target = 1500  # run this many steps before saving + testing
+        self.testing_phase_active = False  # flag: we are now in the testing phase
+
         latency_log_path = Path(constants.training_log_folder + "/plots") / ".." / "latency_log.txt"
         latency_log_path = latency_log_path.resolve()
         with open(latency_log_path, "w") as f:
@@ -81,6 +87,7 @@ class Controller:
                     f"{'Latency(ms)':<14} {'QueueWait(ms)':<16} {'Total(ms)':<12} "
                     f"{'D1':<8} {'D2':<8} {'Satisfaction':<12} Arrival\n")
             f.write("=" * 100 + "\n")
+
     # ------------------------------------------------------------
     # Utility
     # ------------------------------------------------------------
@@ -184,14 +191,14 @@ class Controller:
             server_indices = range(num_servers)
         else:
             server_indices = action_subset
-            
+
             try:
-            
+
                 ########################################################################################################
-                # Track P(T) values for satisfaction calculation, to be used in episodic reward. 
-                # Calculated once per request after processing is complete 
+                # Track P(T) values for satisfaction calculation, to be used in episodic reward.
+                # Calculated once per request after processing is complete
                 # (i.e. after action is taken and request is scheduled on selected servers).
-                # 
+                #
                 # For each request with completion time T:
                 #
                 #     P(T) = 1                      if T <= D1        (fully satisfied)
@@ -204,58 +211,57 @@ class Controller:
                 #     T = minimum observed completion time for this request among all the servers it was assigned to
                 #         + total waiting time in the queue before processing starts
                 #######################################################################################################
-                
+
                 # D1 = request.deadline[0]  # soft deadline in ms
                 # D2 = request.deadline[1]  # hard deadline in ms
-                
+
                 # request combination type
                 combination = request.combination[0]
-                
-                if(combination == "s"):
-                    D1, D2  = self.deadlines[0]  # soft and hard deadlines for "s" type requests
+
+                if (combination == "s"):
+                    D1, D2 = self.deadlines[0]  # soft and hard deadlines for "s" type requests
                 else:
-                    D1, D2 = self.deadlines[1]   # soft and hard deadlines for "d" or "p" type requests
-                
-                
+                    D1, D2 = self.deadlines[1]  # soft and hard deadlines for "d" or "p" type requests
+
                 # minimum observed completion time for this request among all the servers it was assigned to
                 delays = request.total_processing_delay
                 valid_delays = delays[delays >= 0]
                 # keep only valid (processed) delays (removing -1s)
-                min_observed_completion_time = ( np.min(valid_delays) if valid_delays.size > 0 else 0.0 )
+                min_observed_completion_time = (np.min(valid_delays) if valid_delays.size > 0 else 0.0)
 
                 # total waiting time in the queue before processing starts
                 total_queue_waiting_time = request.queue_waiting_time
-                
+
                 # Total time = completion time + queue waiting time (in ms)
                 T = min_observed_completion_time + total_queue_waiting_time
-                
+
                 print(f"[CONTROLLER, P(T) CALC] Req {request.request_id}: T={T:.2f} ms, D1={D1} ms, D2={D2} ms")
                 if T <= D1:
                     self.average_P_T_values.append(1)
                 elif D1 < T <= D2:
                     P_T = (T - D1) / (D2 - D1)
                     self.average_P_T_values.append(P_T)
-                else:                    
+                else:
                     self.average_P_T_values.append(0)
-                    
+
                 #######################################################################################################
-                
+
                 # Track request completion counts for different combination types (for use in episodic reward shaping)
-                if(combination == "s"):
+                if (combination == "s"):
                     self.request_s_total += 1
                     # if T <= D2:
                     #     self.request_s_done += 1
-                elif(combination == "d"):
+                elif (combination == "d"):
                     self.request_d_total += 1
                     # if T <= D2:
                     #     self.request_d_done += 1
-                elif(combination == "p"):
+                elif (combination == "p"):
                     self.request_p_total += 1
                     # if T <= D2:
                     #     self.request_p_done += 1
-                        
+
                 #######################################################################################################
-            
+
             except Exception as e:
                 print(f"[CONTROLLER, !] Failed to compute P(T) for satisfaction tracking: {type(e).__name__} - {e}")
                 print(request.deadline)
@@ -350,7 +356,7 @@ class Controller:
         discounted_step_rewards = sum(
             (gamma ** i) * r for i, r in enumerate(self.step_rewards)
         )
-        
+
         ##############################################################################################
         # Degree of satisfaction ω
         ##############################################################################################
@@ -360,17 +366,16 @@ class Controller:
         #
         # omega (ω) = (sum of P(T) over all requests) / (total number of expected requests in episode)
         ##############################################################################################
-        
+
         # sum of P(T) over all requests
         average_P_T = sum(self.average_P_T_values)
-        
+
         # total number of expected requests in episode
         total_requests_in_episode = constants.total_no_request / constants.no_of_episodes
-        
-        # average satisfaction ω for this episode      
+
+        # average satisfaction ω for this episode
         omega = average_P_T / total_requests_in_episode if total_requests_in_episode > 0 else 0.0
-        
-        
+
         #################################################################################
         # Average waiting time across the episode
         #################################################################################
@@ -380,16 +385,18 @@ class Controller:
         # sum of (Percentage of s done) * D1 + (Percentage of d done) * D1 + (Percentage of p done) * D1
         wait_time_denominator = 0.0
         if self.request_s_total > 0:
-            wait_time_denominator += (self.request_s_done/self.request_s_total)*100
+            wait_time_denominator += (self.request_s_done / self.request_s_total) * 100
         if self.request_d_total > 0:
-            wait_time_denominator += (self.request_d_done/self.request_d_total)*30
+            wait_time_denominator += (self.request_d_done / self.request_d_total) * 30
         if self.request_p_total > 0:
-            wait_time_denominator += (self.request_p_done/self.request_p_total)*30
+            wait_time_denominator += (self.request_p_done / self.request_p_total) * 30
 
         #################################################################################
 
         # Episodic reward
-        episodic_reward = (discounted_step_rewards + omega - avg_waiting_time/wait_time_denominator) if wait_time_denominator > 0 else (discounted_step_rewards + omega)
+        episodic_reward = (
+                    discounted_step_rewards + omega - avg_waiting_time / wait_time_denominator) if wait_time_denominator > 0 else (
+                    discounted_step_rewards + omega)
 
         print(f"[CONTROLLER, EPISODE REWARD] Discounted steps: {discounted_step_rewards:.3f}, "
               f"Satisfaction: {omega:.3f}, Avg wait: {avg_waiting_time:.3f} ms, "
@@ -442,7 +449,7 @@ class Controller:
                 )
                 request_total_delay.append(float(-1))  # Use -1 to indicate failure to compute delay for this server
                 combined_strs.append(None)
-        
+
         # Store estimated total_delay in request for each server for prediction of RL model
         request.total_processing_delay = np.array(request_total_delay)
         request_total_delay = [float(-1)] * self.num_servers # reset to later use for tracking observed latency after action is taken (i.e. when request is scheduled and completed)
@@ -475,10 +482,10 @@ class Controller:
         # track the waiting time in the queue before request starts processing
         try:
             request.queue_waiting_time = time.time() * 1000.0 - request.arrival_time  # in ms
-            self.average_waiting_times.append(request.queue_waiting_time) 
+            self.average_waiting_times.append(request.queue_waiting_time)
         except Exception as e:
             print(f"[CONTROLLER, !] Failed to compute waiting time: {type(e).__name__} - {e}")
-            request.queue_waiting_time = 0.0  
+            request.queue_waiting_time = 0.0
         l = []
         # assign request
         for i in action_subset:
@@ -487,7 +494,7 @@ class Controller:
                 # Update observed processing time for this server (in ms)
                 request_total_delay[i] = float(processing_time) * 1000.0
                 l.append([request_total_delay[i], combined_str])
-                
+
             except Exception as e:
                 print(
                     f"[CONTROLLER, !] Failed to schedule request on server {i}: "
@@ -497,7 +504,7 @@ class Controller:
 
         # Store actual total_delay in request for each server for reward calculation and tracking
         request.total_processing_delay = np.array(request_total_delay)
-        
+
         # compute reward and track latency metrics
         try:
             final_step_reward_list = self.compute_step_reward(request, action_subset)
@@ -556,7 +563,178 @@ class Controller:
 
         self.current_step += 1
 
-    def finalize_episode(self):
+        # ---- Post-epsilon-min countdown ----
+        if not self.epsilon_min_reached and self.agent.epsilon <= self.agent.epsilon_min:
+            self.epsilon_min_reached = True
+            print(
+                f"[CONTROLLER] 🏁 Epsilon has reached its minimum value "
+                f"({self.agent.epsilon_min}). "
+                f"Running {self.post_epsilon_steps_target} more steps, "
+                f"then saving model and entering testing phase."
+            )
+
+        if self.epsilon_min_reached and not self.testing_phase_active:
+            self.post_epsilon_steps += 1
+            print(
+                f"[CONTROLLER] 📍 Post-epsilon-min step "
+                f"{self.post_epsilon_steps}/{self.post_epsilon_steps_target}"
+            )
+            if self.post_epsilon_steps >= self.post_epsilon_steps_target:
+                self._save_and_enter_testing()
+
+    def _save_and_enter_testing(self):
+        """
+        Called once, after 1500 steps beyond epsilon_min:
+        1. Save the trained model (and metrics).
+        2. Switch into testing phase (epsilon = 0, no replay training).
+        """
+        print("\n" + "=" * 60)
+        print("[CONTROLLER] 💾 Post-epsilon-min steps complete. Saving model...")
+        print("=" * 60)
+
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        save_dir = Path(constants.training_log_folder) / "post_epsilon_min_save"
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save Keras model
+        model_path = save_dir / f"model_post_eps_min_{timestamp}.keras"
+        try:
+            self.agent.model.save(model_path)
+            print(f"[CONTROLLER] ✅ Model saved to {model_path}")
+        except Exception as e:
+            print(f"[CONTROLLER] ⚠️ Failed to save model: {type(e).__name__} - {e}")
+
+        # Save metrics CSV
+        try:
+            import pandas as pd
+            pd.DataFrame({
+                "epsilon": self.agent.epsilon_curve,
+                "reward": self.agent.rewards,
+                "loss": self.agent.loss,
+                "val_loss": self.agent.val_loss,
+                "latency": self.agent.latencies,
+                "deviation": self.agent.deviations,
+            }).to_csv(save_dir / f"metrics_post_eps_min_{timestamp}.csv", index=False)
+            print(f"[CONTROLLER] 📊 Metrics saved to {save_dir}")
+        except Exception as e:
+            print(f"[CONTROLLER] ⚠️ Failed to save metrics: {type(e).__name__} - {e}")
+
+        # Generate plots at this checkpoint
+        try:
+            self.agent.plot_all_metrics(save_dir=save_dir, show_plot=False)
+            self.agent.save_metrics_summary(save_dir / f"summary_post_eps_min_{timestamp}.txt")
+        except Exception as e:
+            print(f"[CONTROLLER] ⚠️ Failed to generate checkpoint plots: {type(e).__name__} - {e}")
+
+        # Enter testing phase
+        self.testing_phase_active = True
+        self.agent.epsilon = 0.0  # pure exploitation – no exploration during testing
+        print("\n" + "=" * 60)
+        print("[CONTROLLER] 🧪 Entering TESTING PHASE (epsilon=0, no training).")
+        print("=" * 60 + "\n")
+
+    def run_testing_phase(self, request):
+        """
+        Process a single request in testing mode:
+        - Epsilon is 0 (pure greedy / exploit-only).
+        - No experience replay / no weight updates.
+        - Metrics (latency, reward, action) are still recorded.
+        """
+        print(f"\n[CONTROLLER, TEST STEP] Processing request {getattr(request, 'request_id', '?')}.")
+        try:
+            load = self.find_free_servers()
+            num_free = sum(l != -1 for l in load)
+        except Exception as e:
+            print(f"[CONTROLLER, TEST, !] Failed to find free servers: {type(e).__name__} - {e}")
+            return
+
+        if num_free == 0:
+            print("[CONTROLLER, TEST, QUEUE] All servers busy. Retrying shortly.")
+            time.sleep(0.1)
+            self.run_testing_phase(request)
+            return
+
+        try:
+            request.load = np.array(load)
+            request_total_delay = []
+            combined_strs = []
+        except Exception as e:
+            print(f"[CONTROLLER, TEST, !] Failed to update request state: {type(e).__name__} - {e}")
+            return
+
+        for i in range(self.num_servers):
+            try:
+                delay, combined_str = self.server_list[i].compute_request_time(request)
+                request_total_delay.append(delay)
+                combined_strs.append(combined_str)
+            except Exception as e:
+                request_total_delay.append(float(-1))
+                combined_strs.append(None)
+
+        request.total_processing_delay = np.array(request_total_delay)
+        request_total_delay = [float(-1)] * self.num_servers
+
+        for i in range(len(combined_strs)):
+            try:
+                if combined_strs[i] is not None:
+                    request.populate_request_from_csv(i, combined_strs[i])
+            except Exception as e:
+                print(f"[CONTROLLER, TEST, !] populate_request_from_csv failed for server {i}: {e}")
+
+        try:
+            request.step_reward_list = self.compute_step_reward(request)
+        except Exception as e:
+            request.step_reward_list = np.zeros(self.num_servers, dtype=float)
+
+        # Greedy action (epsilon=0 ensures pure exploitation)
+        try:
+            action_subset, action_index = self.agent.get_action(request)
+        except Exception as e:
+            print(f"[CONTROLLER, TEST, !] Agent action failed: {type(e).__name__} - {e}")
+            return
+
+        try:
+            request.queue_waiting_time = time.time() * 1000.0 - request.arrival_time
+        except Exception:
+            request.queue_waiting_time = 0.0
+
+        l = []
+        for i in action_subset:
+            try:
+                _, _, processing_time, combined_str = self.server_list[i].schedule_request(request)
+                request_total_delay[i] = float(processing_time) * 1000.0
+                l.append([request_total_delay[i], combined_str])
+            except Exception as e:
+                print(f"[CONTROLLER, TEST, !] Schedule failed on server {i}: {type(e).__name__} - {e}")
+
+        request.total_processing_delay = np.array(request_total_delay)
+
+        # Measure reward + latency (no training)
+        try:
+            final_reward_list = self.compute_step_reward(request, action_subset)
+            combined_reward = np.mean(final_reward_list)
+            if l:
+                observed_latency = sorted(l)[0][0]
+                request.combination = sorted(l)[0][1]
+                self.episode_latencies.append(observed_latency)
+                deviation = abs(observed_latency - self.agent.median_computation_delay)
+                self.episode_deviations.append(deviation)
+                self.log_latency_to_file(
+                    request=request,
+                    observed_latency=observed_latency,
+                    action_subset=action_subset,
+                    episode=self.current_episode,
+                    step=self.current_step
+                )
+            print(
+                f"[CONTROLLER, TEST STEP] Done. "
+                f"Action={list(action_subset)}, Reward={combined_reward:.3f}"
+            )
+        except Exception as e:
+            print(f"[CONTROLLER, TEST, !] Reward/latency tracking failed: {type(e).__name__} - {e}")
+
+        self.current_step += 1
+
         """
         Finalize the episode:
         1. Compute episodic reward
@@ -585,8 +763,10 @@ class Controller:
                 next_state_request=exp['next_state']
             )
 
-        # Train agent once per episode
-        if len(self.agent.memory) >= self.agent.batch_size:
+        # Train agent once per episode (skip during testing phase)
+        if self.testing_phase_active:
+            print(f"[CONTROLLER, EPISODE {self.current_episode}] Testing phase – skipping training.")
+        elif len(self.agent.memory) >= self.agent.batch_size:
             print(f"[CONTROLLER, EPISODE {self.current_episode}] Training agent...")
             self.agent.experience_replay(self.agent.batch_size)
             print(f"[CONTROLLER, EPISODE {self.current_episode}] Training complete.")
@@ -624,7 +804,6 @@ class Controller:
                 (self.current_episode % self.plot_every_n_episodes == 0) or  # Every N episodes
                 (self.current_episode + 1 >= self.expected_episodes)  # Final episode
         )
-
 
         if should_plot:
             self.generate_plots()
@@ -832,20 +1011,25 @@ class Controller:
             for request in chunk:
                 try:
                     with self.lock:
+                        # ---- Testing phase: pure exploitation, no training ----
+                        if self.testing_phase_active:
+                            self.run_testing_phase(request)
+                            continue
+
                         # Process this chunk as one STEP
-                        
+
                         self.process_step(request)
-                        
+
                         # request combination type
                         combination = request.combination[0]
                         # Track request completion counts for different combination types (for use in episodic reward shaping)
-                        if(combination == "s"):
+                        if (combination == "s"):
                             self.request_s_done += 1
-                        elif(combination == "d"):
+                        elif (combination == "d"):
                             self.request_d_done += 1
-                        elif(combination == "p"):
+                        elif (combination == "p"):
                             self.request_p_done += 1
-                            
+
                 except Exception as e:
                     # Fail-soft: skip bad request, continue episode
                     print(

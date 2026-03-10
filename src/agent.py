@@ -213,27 +213,40 @@ class DQNAgent:
         Uses Functional API to handle variable-length inputs.
         Architecture:
         - Input: (batch, variable_length, 1) - raw flattened request state
-        - Encoder: Dense → Dense → GlobalAvgPool → Dense (output: 32-dim)
-        - DQN: Dense → BN → Dense → BN → Dense (output: nA actions)
+        - Encoder: Dense → Dropout → Dense → Dropout → GlobalAvgPool → Dense (output: 24-dim)
+        - DQN: Dense → BN → Dropout → Dense → BN → Dropout → Dense (output: nA actions)
+
+        Changes to reduce overfitting:
+        - Reduced layer sizes (128→64, 64→32, 64→48, 128→64)
+        - Replaced sigmoid with relu in DQN (sigmoid saturates, slows learning, encourages memorization)
+        - Added Dropout(0.3) after encoder dense layers
+        - Added Dropout(0.4) after DQN hidden layers
+        - Removed softmax from q_values output (incorrect for DQN - use linear)
         """
         # Input: variable-length flattened state (batch, variable_length, 1)
         encoder_input = keras.Input(shape=(None, 1), name='raw_state_input')
+
         # ===== ENCODER LAYERS =====
-        # These will be trained along with the DQN!
-        x = layers.Dense(128, activation='relu', name='encoder_expand')(encoder_input)
-        x = layers.Dense(64, activation='relu', name='encoder_project')(x)
-        x = layers.GlobalAveragePooling1D(name='encoder_pool')(x)  # (batch, 64)
-        encoded = layers.Dense(32, activation='relu', name='encoder_output')(x)  # (batch, 32)
-        # ===== DQN LAYERS (operating on fixed 32-dim encoded state) =====
-        x = layers.Dense(64, activation='sigmoid', name='dqn_hidden1')(encoded)
+        x = layers.Dense(64, activation='relu', name='encoder_expand')(encoder_input)  # 128 → 64
+        x = layers.Dropout(0.3, name='encoder_drop1')(x)
+        x = layers.Dense(32, activation='relu', name='encoder_project')(x)  # 64 → 32
+        x = layers.Dropout(0.3, name='encoder_drop2')(x)
+        x = layers.GlobalAveragePooling1D(name='encoder_pool')(x)  # (batch, 32)
+        encoded = layers.Dense(24, activation='relu', name='encoder_output')(x)  # 32 → 24
+
+        # ===== DQN LAYERS (operating on fixed 24-dim encoded state) =====
+        x = layers.Dense(48, activation='relu', name='dqn_hidden1')(encoded)  # 64 → 48
         x = layers.BatchNormalization(name='dqn_bn1')(x)
-        x = layers.Dense(128, activation='sigmoid', name='dqn_hidden2')(x)
+        x = layers.Dropout(0.4, name='dqn_drop1')(x)
+        x = layers.Dense(64, activation='relu', name='dqn_hidden2')(x)  # 128 → 64
         x = layers.BatchNormalization(name='dqn_bn2')(x)
-        q_values = layers.Dense(self.nA, activation='softmax', name='dqn_output')(x)
+        x = layers.Dropout(0.4, name='dqn_drop2')(x)
+        q_values = layers.Dense(self.nA, activation='linear', name='dqn_output')(x)  # linear, not softmax
+
         # Create the combined model
         model = keras.Model(inputs=encoder_input, outputs=q_values, name='integrated_encoder_dqn')
         model.compile(
-            loss='categorical_crossentropy',
+            loss='mse',  # mse for Q-value regression
             optimizer=keras.optimizers.Adam(learning_rate=self.learning_rate)
         )
         print("[AGENT] ✅ Built integrated Encoder+DQN model (end-to-end trainable)")
