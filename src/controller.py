@@ -505,6 +505,9 @@ class Controller:
 
             # Track observed latency (minimum among selected servers)
             if len(action_subset) > 0 and hasattr(request, 'total_processing_delay'):
+                observed_latency = min(request.total_processing_delay[i] for i in action_subset
+                                       if i < len(request.total_processing_delay))
+            if len(action_subset) > 0 and hasattr(request, 'total_processing_delay'):
                 observed_latency = sorted(l)[0][0]
                 request.combination = sorted(l)[0][1]
                 self.episode_latencies.append(observed_latency)
