@@ -379,9 +379,10 @@ class Controller:
         #################################################################################
         # Average waiting time across the episode
         #################################################################################
-        
-        avg_waiting_time = sum(self.average_waiting_times) / len(self.average_waiting_times) if self.average_waiting_times else 0.0
-        
+
+        avg_waiting_time = sum(self.average_waiting_times) / len(
+            self.average_waiting_times) if self.average_waiting_times else 0.0
+
         # sum of (Percentage of s done) * D1 + (Percentage of d done) * D1 + (Percentage of p done) * D1
         wait_time_denominator = 0.0
         if self.request_s_total > 0:
@@ -393,14 +394,22 @@ class Controller:
 
         #################################################################################
 
-        # Episodic reward
-        episodic_reward = (
-                    discounted_step_rewards + omega - avg_waiting_time / wait_time_denominator) if wait_time_denominator > 0 else (
-                    discounted_step_rewards + omega)
+        # Episodic reward (raw)
+        # NOTE: avg_waiting_time is in ms — normalise to seconds before dividing
+        # to prevent the wait penalty from dominating and exploding Q-targets.
+        avg_waiting_time_s = avg_waiting_time / 1000.0  # ms → s
+        episodic_reward_raw = (
+            discounted_step_rewards + omega - avg_waiting_time_s / wait_time_denominator
+            if wait_time_denominator > 0
+            else discounted_step_rewards + omega
+        )
+
+        # Hard-clip to [-10, 10] so Q-targets never diverge to 10^16
+        episodic_reward = float(np.clip(episodic_reward_raw, -10.0, 10.0))
 
         print(f"[CONTROLLER, EPISODE REWARD] Discounted steps: {discounted_step_rewards:.3f}, "
               f"Satisfaction: {omega:.3f}, Avg wait: {avg_waiting_time:.3f} ms, "
-              f"R_episode: {episodic_reward:.3f}")
+              f"R_raw: {episodic_reward_raw:.3f}, R_clipped: {episodic_reward:.3f}")
 
         return episodic_reward
 
@@ -452,7 +461,8 @@ class Controller:
 
         # Store estimated total_delay in request for each server for prediction of RL model
         request.total_processing_delay = np.array(request_total_delay)
-        request_total_delay = [float(-1)] * self.num_servers # reset to later use for tracking observed latency after action is taken (i.e. when request is scheduled and completed)
+        request_total_delay = [float(
+            -1)] * self.num_servers  # reset to later use for tracking observed latency after action is taken (i.e. when request is scheduled and completed)
 
         # Update request state to add data from servers
         for i in range(len(combined_strs)):
@@ -581,6 +591,110 @@ class Controller:
             )
             if self.post_epsilon_steps >= self.post_epsilon_steps_target:
                 self._save_and_enter_testing()
+
+    def finalize_episode(self):
+        """
+        Finalize the episode:
+        1. Compute episodic reward
+        2. Store all experiences in replay buffer
+        3. Train the agent
+        4. Generate plots (periodically)
+        """
+        print(f"\n{'=' * 60}")
+        print(f"[CONTROLLER, EPISODE {self.current_episode}] Finalizing...")
+
+        # Compute episodic reward
+        episodic_reward = self.compute_episodic_reward()
+
+        print(
+            f"[EPISODE {self.current_episode}] "
+            f"Steps={len(self.step_rewards)}, "
+            f"Reward={episodic_reward:.4f}"
+        )
+
+        # Store all experiences from this episode with episodic reward
+        for exp in self.step_experiences:
+            self.agent.store(
+                state_request=exp['state'],
+                action=exp['action'],
+                reward=episodic_reward,  # Use episodic reward for all experiences
+                next_state_request=exp['next_state']
+            )
+
+        # Train agent once per episode (skip during testing phase)
+        if self.testing_phase_active:
+            print(f"[CONTROLLER, EPISODE {self.current_episode}] Testing phase – skipping training.")
+        elif len(self.agent.memory) >= self.agent.batch_size:
+            print(f"[CONTROLLER, EPISODE {self.current_episode}] Training agent...")
+            self.agent.experience_replay(self.agent.batch_size)
+            print(f"[CONTROLLER, EPISODE {self.current_episode}] Training complete.")
+        else:
+            print(
+                f"[CONTROLLER, EPISODE {self.current_episode}] "
+                f"Not enough experiences to train "
+                f"(have {len(self.agent.memory)}, need {self.agent.batch_size})"
+            )
+
+        # Log episode metrics
+        print(f"[CONTROLLER, EPISODE {self.current_episode}] "
+              f"Experiences: {len(self.step_experiences)}, "
+              f"Episodic Reward: {episodic_reward:.3f}, "
+              f"Epsilon: {self.agent.epsilon:.6f}")
+
+        # Transfer episode metrics to agent for plotting
+        if len(self.episode_latencies) > 0:
+            self.agent.latencies = np.append(self.agent.latencies, self.episode_latencies)
+        if len(self.episode_deviations) > 0:
+            self.agent.deviations = np.append(self.agent.deviations, self.episode_deviations)
+
+        episode_end_time = time.time()
+        episode_duration = episode_end_time - self.episode_start_time
+
+        print(
+            f"[CONTROLLER, EPISODE {self.current_episode}] "
+            f"Time taken: {episode_duration:.2f} seconds"
+        )
+        self.episode_start_time = None
+
+        # ============================================================
+        # PLOTTING: Generate plots periodically and at the end
+        # ============================================================
+        should_plot = (
+                (self.current_episode % self.plot_every_n_episodes == 0) or  # Every N episodes
+                (self.current_episode + 1 >= self.expected_episodes)  # Final episode
+        )
+
+        if should_plot:
+            self.generate_plots()
+
+        # Checkpoint every N episodes
+        # if self.current_episode % 10 == 0:
+        #     self.save_checkpoint()
+
+        # Reset episode-level tracking
+        self.step_experiences = []
+        self.step_rewards = []
+        self.episode_waiting_times = []
+        self.episode_latencies = []  # Clear latency tracking
+        self.episode_deviations = []  # Clear deviation tracking
+        self.current_chunk = 0
+        self.current_step = 0
+        self.current_episode += 1
+        self.average_P_T_values = []  # Clear P(T) tracking for next episode
+        self.average_waiting_times = []  # Clear waiting time tracking for next episode
+        self.request_s_done = 0
+        self.request_s_total = 0
+        self.request_d_done = 0
+        self.request_d_total = 0
+        self.request_p_done = 0
+        self.request_p_total = 0
+        if self.current_episode >= self.expected_episodes:
+            print("[CONTROLLER] ✅ All training episodes finished.")
+            # Generate final comprehensive plots
+            self.generate_final_plots()
+            self.training_done.set()
+
+        print(f"{'=' * 60}\n")
 
     def _save_and_enter_testing(self):
         """

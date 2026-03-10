@@ -247,7 +247,7 @@ class DQNAgent:
         model = keras.Model(inputs=encoder_input, outputs=q_values, name='integrated_encoder_dqn')
         model.compile(
             loss='mse',  # mse for Q-value regression
-            optimizer=keras.optimizers.Adam(learning_rate=self.learning_rate)
+            optimizer=keras.optimizers.Adam(learning_rate=self.learning_rate, clipnorm=1.0)
         )
         print("[AGENT] ✅ Built integrated Encoder+DQN model (end-to-end trainable)")
         print(model.summary())
@@ -336,6 +336,8 @@ class DQNAgent:
         targets[np.arange(batch_size), actions] = (
                 rewards + self.reward_gamma * np.amax(next_q_values, axis=1)
         )
+        # Clip targets to a sane range to prevent MSE loss explosion
+        targets = np.clip(targets, -10.0, 10.0)
         # Train (gradients flow through encoder!)
         hist = self.model.fit(
             states_padded,
