@@ -14,6 +14,12 @@ from agent import DQNAgent
 class Controller:
     def __init__(self, num_servers=5, steps_per_episode=10, chunks_per_episode=3):
 
+        self.testing_phase_active = False
+        self.testing_request_limit = 3000
+        self.testing_request_count = 0
+        self.testing_rewards = []
+        self.testing_latencies = []
+
         self.num_servers = num_servers
         self.server_list = [servers.Server(i + 1) for i in range(num_servers)]
 
@@ -75,7 +81,7 @@ class Controller:
         # ---------------- Post-epsilon-min phase ----------------
         self.epsilon_min_reached = False  # flag: epsilon has hit its floor
         self.post_epsilon_steps = 0  # steps counted after epsilon_min reached
-        self.post_epsilon_steps_target = 1500  # run this many steps before saving + testing
+        self.post_epsilon_steps_target = 3500  # run this many steps before saving + testing
         self.testing_phase_active = False  # flag: we are now in the testing phase
 
         latency_log_path = Path(constants.training_log_folder + "/plots") / ".." / "latency_log.txt"
@@ -698,10 +704,11 @@ class Controller:
 
     def _save_and_enter_testing(self):
         """
-        Called once, after 1500 steps beyond epsilon_min:
-        1. Save the trained model (and metrics).
-        2. Switch into testing phase (epsilon = 0, no replay training).
+        Called once after post-epsilon steps:
+        1. Save trained model
+        2. Switch to testing mode
         """
+
         print("\n" + "=" * 60)
         print("[CONTROLLER] 💾 Post-epsilon-min steps complete. Saving model...")
         print("=" * 60)
@@ -710,129 +717,94 @@ class Controller:
         save_dir = Path(constants.training_log_folder) / "post_epsilon_min_save"
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save Keras model
+        # Save model
         model_path = save_dir / f"model_post_eps_min_{timestamp}.keras"
+
         try:
             self.agent.model.save(model_path)
             print(f"[CONTROLLER] ✅ Model saved to {model_path}")
         except Exception as e:
             print(f"[CONTROLLER] ⚠️ Failed to save model: {type(e).__name__} - {e}")
 
-        # Save metrics CSV
-        try:
-            import pandas as pd
-            pd.DataFrame({
-                "epsilon": self.agent.epsilon_curve,
-                "reward": self.agent.rewards,
-                "loss": self.agent.loss,
-                "val_loss": self.agent.val_loss,
-                "latency": self.agent.latencies,
-                "deviation": self.agent.deviations,
-            }).to_csv(save_dir / f"metrics_post_eps_min_{timestamp}.csv", index=False)
-            print(f"[CONTROLLER] 📊 Metrics saved to {save_dir}")
-        except Exception as e:
-            print(f"[CONTROLLER] ⚠️ Failed to save metrics: {type(e).__name__} - {e}")
-
-        # Generate plots at this checkpoint
-        try:
-            self.agent.plot_all_metrics(save_dir=save_dir, show_plot=False)
-            self.agent.save_metrics_summary(save_dir / f"summary_post_eps_min_{timestamp}.txt")
-        except Exception as e:
-            print(f"[CONTROLLER] ⚠️ Failed to generate checkpoint plots: {type(e).__name__} - {e}")
-
-        # Enter testing phase
+        # Activate testing phase
         self.testing_phase_active = True
-        self.agent.epsilon = 0.0  # pure exploitation – no exploration during testing
+        self.agent.epsilon = 0.0
+
+        # testing counters
+        self.testing_request_count = 0
+        self.testing_request_limit = 3000
+
+        # store testing metrics
+        self.testing_rewards = []
+        self.testing_latencies = []
+
         print("\n" + "=" * 60)
-        print("[CONTROLLER] 🧪 Entering TESTING PHASE (epsilon=0, no training).")
+        print("[CONTROLLER] 🧪 ENTERING TESTING PHASE (3000 requests)")
         print("=" * 60 + "\n")
 
     def run_testing_phase(self, request):
         """
-        Process a single request in testing mode:
-        - Epsilon is 0 (pure greedy / exploit-only).
-        - No experience replay / no weight updates.
-        - Metrics (latency, reward, action) are still recorded.
+        Pure testing phase.
+        - No training
+        - Greedy actions (epsilon = 0)
+        - Record reward + latency
+        - Stop after 3000 requests
         """
-        print(f"\n[CONTROLLER, TEST STEP] Processing request {getattr(request, 'request_id', '?')}.")
+
+        if self.testing_request_count >= self.testing_request_limit:
+            print("[CONTROLLER] ✅ Testing finished.")
+            self.generate_testing_plots()
+            self.training_done.set()
+            return
+
+        print(f"[CONTROLLER, TEST] Processing request {getattr(request, 'request_id', '?')}")
+
         try:
             load = self.find_free_servers()
-            num_free = sum(l != -1 for l in load)
-        except Exception as e:
-            print(f"[CONTROLLER, TEST, !] Failed to find free servers: {type(e).__name__} - {e}")
-            return
-
-        if num_free == 0:
-            print("[CONTROLLER, TEST, QUEUE] All servers busy. Retrying shortly.")
-            time.sleep(0.1)
-            self.run_testing_phase(request)
-            return
-
-        try:
             request.load = np.array(load)
+
             request_total_delay = []
             combined_strs = []
-        except Exception as e:
-            print(f"[CONTROLLER, TEST, !] Failed to update request state: {type(e).__name__} - {e}")
-            return
 
-        for i in range(self.num_servers):
-            try:
+            for i in range(self.num_servers):
                 delay, combined_str = self.server_list[i].compute_request_time(request)
                 request_total_delay.append(delay)
                 combined_strs.append(combined_str)
-            except Exception as e:
-                request_total_delay.append(float(-1))
-                combined_strs.append(None)
 
-        request.total_processing_delay = np.array(request_total_delay)
-        request_total_delay = [float(-1)] * self.num_servers
+            request.total_processing_delay = np.array(request_total_delay)
+            request_total_delay = [float(-1)] * self.num_servers
 
-        for i in range(len(combined_strs)):
-            try:
+            for i in range(len(combined_strs)):
                 if combined_strs[i] is not None:
                     request.populate_request_from_csv(i, combined_strs[i])
-            except Exception as e:
-                print(f"[CONTROLLER, TEST, !] populate_request_from_csv failed for server {i}: {e}")
 
-        try:
             request.step_reward_list = self.compute_step_reward(request)
-        except Exception as e:
-            request.step_reward_list = np.zeros(self.num_servers, dtype=float)
 
-        # Greedy action (epsilon=0 ensures pure exploitation)
-        try:
+            # greedy action
             action_subset, action_index = self.agent.get_action(request)
-        except Exception as e:
-            print(f"[CONTROLLER, TEST, !] Agent action failed: {type(e).__name__} - {e}")
-            return
 
-        try:
             request.queue_waiting_time = time.time() * 1000.0 - request.arrival_time
-        except Exception:
-            request.queue_waiting_time = 0.0
 
-        l = []
-        for i in action_subset:
-            try:
+            l = []
+
+            for i in action_subset:
                 _, _, processing_time, combined_str = self.server_list[i].schedule_request(request)
+
                 request_total_delay[i] = float(processing_time) * 1000.0
                 l.append([request_total_delay[i], combined_str])
-            except Exception as e:
-                print(f"[CONTROLLER, TEST, !] Schedule failed on server {i}: {type(e).__name__} - {e}")
 
-        request.total_processing_delay = np.array(request_total_delay)
+            request.total_processing_delay = np.array(request_total_delay)
 
-        # Measure reward + latency (no training)
-        try:
             final_reward_list = self.compute_step_reward(request, action_subset)
             combined_reward = np.mean(final_reward_list)
-            if l:
+
+            if len(l) > 0:
                 observed_latency = sorted(l)[0][0]
                 request.combination = sorted(l)[0][1]
-                self.episode_latencies.append(observed_latency)
-                deviation = abs(observed_latency - self.agent.median_computation_delay)
-                self.episode_deviations.append(deviation)
+
+                self.testing_rewards.append(combined_reward)
+                self.testing_latencies.append(observed_latency)
+
                 self.log_latency_to_file(
                     request=request,
                     observed_latency=observed_latency,
@@ -840,116 +812,51 @@ class Controller:
                     episode=self.current_episode,
                     step=self.current_step
                 )
+
             print(
-                f"[CONTROLLER, TEST STEP] Done. "
-                f"Action={list(action_subset)}, Reward={combined_reward:.3f}"
+                f"[TEST] Request {self.testing_request_count + 1}/3000 "
+                f"Reward={combined_reward:.3f}"
             )
+
+            self.testing_request_count += 1
+            self.current_step += 1
+
         except Exception as e:
-            print(f"[CONTROLLER, TEST, !] Reward/latency tracking failed: {type(e).__name__} - {e}")
+            print(f"[CONTROLLER, TEST ERROR] {type(e).__name__} - {e}")
 
-        self.current_step += 1
-
+    def generate_testing_plots(self):
         """
-        Finalize the episode:
-        1. Compute episodic reward
-        2. Store all experiences in replay buffer
-        3. Train the agent
-        4. Generate plots (periodically)
+        Plot testing results:
+        - reward
+        - latency
         """
-        print(f"\n{'=' * 60}")
-        print(f"[CONTROLLER, EPISODE {self.current_episode}] Finalizing...")
 
-        # Compute episodic reward
-        episodic_reward = self.compute_episodic_reward()
+        import matplotlib.pyplot as plt
 
-        print(
-            f"[EPISODE {self.current_episode}] "
-            f"Steps={len(self.step_rewards)}, "
-            f"Reward={episodic_reward:.4f}"
-        )
+        save_dir = Path(constants.training_log_folder) / "testing_results"
+        save_dir.mkdir(parents=True, exist_ok=True)
 
-        # Store all experiences from this episode with episodic reward
-        for exp in self.step_experiences:
-            self.agent.store(
-                state_request=exp['state'],
-                action=exp['action'],
-                reward=episodic_reward,  # Use episodic reward for all experiences
-                next_state_request=exp['next_state']
-            )
+        # Reward plot
+        plt.figure(figsize=(10, 5))
+        plt.plot(self.testing_rewards)
+        plt.xlabel("Request Number")
+        plt.ylabel("Reward")
+        plt.title("Testing Reward")
+        plt.grid(True)
+        plt.savefig(save_dir / "testing_rewards.png")
+        plt.close()
 
-        # Train agent once per episode (skip during testing phase)
-        if self.testing_phase_active:
-            print(f"[CONTROLLER, EPISODE {self.current_episode}] Testing phase – skipping training.")
-        elif len(self.agent.memory) >= self.agent.batch_size:
-            print(f"[CONTROLLER, EPISODE {self.current_episode}] Training agent...")
-            self.agent.experience_replay(self.agent.batch_size)
-            print(f"[CONTROLLER, EPISODE {self.current_episode}] Training complete.")
-        else:
-            print(
-                f"[CONTROLLER, EPISODE {self.current_episode}] "
-                f"Not enough experiences to train "
-                f"(have {len(self.agent.memory)}, need {self.agent.batch_size})"
-            )
-        # Log episode metrics
-        print(f"[CONTROLLER, EPISODE {self.current_episode}] "
-              f"Experiences: {len(self.step_experiences)}, "
-              f"Episodic Reward: {episodic_reward:.3f}, "
-              f"Epsilon: {self.agent.epsilon:.6f}")
+        # Latency plot
+        plt.figure(figsize=(10, 5))
+        plt.plot(self.testing_latencies)
+        plt.xlabel("Request Number")
+        plt.ylabel("Latency (ms)")
+        plt.title("Testing Latency")
+        plt.grid(True)
+        plt.savefig(save_dir / "testing_latencies.png")
+        plt.close()
 
-        # Transfer episode metrics to agent for plotting
-        if len(self.episode_latencies) > 0:
-            self.agent.latencies = np.append(self.agent.latencies, self.episode_latencies)
-        if len(self.episode_deviations) > 0:
-            self.agent.deviations = np.append(self.agent.deviations, self.episode_deviations)
-
-        episode_end_time = time.time()
-        episode_duration = episode_end_time - self.episode_start_time
-
-        print(
-            f"[CONTROLLER, EPISODE {self.current_episode}] "
-            f"Time taken: {episode_duration:.2f} seconds"
-        )
-        self.episode_start_time = None
-
-        # ============================================================
-        # PLOTTING: Generate plots periodically and at the end
-        # ============================================================
-        should_plot = (
-                (self.current_episode % self.plot_every_n_episodes == 0) or  # Every N episodes
-                (self.current_episode + 1 >= self.expected_episodes)  # Final episode
-        )
-
-        if should_plot:
-            self.generate_plots()
-
-        # Checkpoint every N episodes
-        # if self.current_episode % 10 == 0:
-        #     self.save_checkpoint()
-
-        # Reset episode-level tracking
-        self.step_experiences = []
-        self.step_rewards = []
-        self.episode_waiting_times = []
-        self.episode_latencies = []  # Clear latency tracking
-        self.episode_deviations = []  # Clear deviation tracking
-        self.current_chunk = 0
-        self.current_step = 0
-        self.current_episode += 1
-        self.average_P_T_values = []  # Clear P(T) tracking for next episode
-        self.average_waiting_times = []  # Clear waiting time tracking for next episode
-        self.request_s_done = 0
-        self.request_s_total = 0
-        self.request_d_done = 0
-        self.request_d_total = 0
-        self.request_p_done = 0
-        self.request_p_total = 0
-        if self.current_episode >= self.expected_episodes:
-            print("[CONTROLLER] ✅ All training episodes finished.")
-            # Generate final comprehensive plots
-            self.generate_final_plots()
-            self.training_done.set()
-
-        print(f"{'=' * 60}\n")
+        print(f"[CONTROLLER] Testing plots saved to {save_dir}")
 
     def generate_plots(self):
         """
