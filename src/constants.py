@@ -1,12 +1,14 @@
+%%writefile src/constants.py
+# paste the edited file contents here
 max_bandwidth = 20
 median_computation_delay = 0.05
-total_no_request = 200000
-chunk_size = 4
+total_no_request = 500000
+chunk_size = 5
 no_of_chunk= int(total_no_request/chunk_size)
 episode_size = 4
 no_of_burst = 1000
 no_of_episodes = int(no_of_chunk/episode_size)
-learning_rate =  3e-4
+learning_rate =  1e-6
 gamma_decay = 0.002
 epsilon_min = 0.1
 min_burst = 2
@@ -18,7 +20,6 @@ lr_decay_rate = 0.999
 lr_min = 1e-5
 training_log_folder = "training_logs_2"
 epochs = 1
-
 no_of_sensors = 1
 max_load = 5
 beta = 5 # Number of edge servers.
