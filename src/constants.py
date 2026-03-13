@@ -36,3 +36,8 @@ deviations = []
 rewards = []
 action = []
 load_arr = []
+
+epsilon_min_reached = False
+post_epsilon_steps = 0
+post_epsilon_steps_target = 8000
+testing_phase_active = False
