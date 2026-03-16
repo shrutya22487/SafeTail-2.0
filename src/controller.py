@@ -729,7 +729,7 @@ class Controller:
         self.agent.epsilon = 0.0
 
         # mark boundary between training and testing for plotting
-        self.agent.testing_start_index = len(self.agent.rewards)
+        self.agent.testing_start_index = len(self.agent.epsilon_curve)
 
         self.testing_request_count = 0
         self.testing_request_limit = 3000
