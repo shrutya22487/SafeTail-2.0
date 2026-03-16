@@ -717,7 +717,6 @@ class Controller:
         save_dir = Path(constants.training_log_folder) / "post_epsilon_min_save"
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save model
         model_path = save_dir / f"model_post_eps_min_{timestamp}.keras"
 
         try:
@@ -726,17 +725,14 @@ class Controller:
         except Exception as e:
             print(f"[CONTROLLER] ⚠️ Failed to save model: {type(e).__name__} - {e}")
 
-        # Activate testing phase
         self.testing_phase_active = True
         self.agent.epsilon = 0.0
 
-        # testing counters
+        # mark boundary between training and testing for plotting
+        self.agent.testing_start_index = len(self.agent.rewards)
+
         self.testing_request_count = 0
         self.testing_request_limit = 3000
-
-        # store testing metrics
-        self.testing_rewards = []
-        self.testing_latencies = []
 
         print("\n" + "=" * 60)
         print("[CONTROLLER] 🧪 ENTERING TESTING PHASE (3000 requests)")
@@ -745,15 +741,14 @@ class Controller:
     def run_testing_phase(self, request):
         """
         Pure testing phase.
-        - No training
-        - Greedy actions (epsilon = 0)
-        - Record reward + latency
-        - Stop after 3000 requests
+        - epsilon = 0 (greedy)
+        - no training
+        - metrics appended to training arrays
         """
 
         if self.testing_request_count >= self.testing_request_limit:
             print("[CONTROLLER] ✅ Testing finished.")
-            self.generate_testing_plots()
+            self.generate_final_plots()
             self.training_done.set()
             return
 
@@ -780,7 +775,7 @@ class Controller:
 
             request.step_reward_list = self.compute_step_reward(request)
 
-            # greedy action
+            # greedy action (epsilon = 0)
             action_subset, action_index = self.agent.get_action(request)
 
             request.queue_waiting_time = time.time() * 1000.0 - request.arrival_time
@@ -802,8 +797,9 @@ class Controller:
                 observed_latency = sorted(l)[0][0]
                 request.combination = sorted(l)[0][1]
 
-                self.testing_rewards.append(combined_reward)
-                self.testing_latencies.append(observed_latency)
+                # Append metrics to training arrays
+                self.agent.rewards = np.append(self.agent.rewards, combined_reward)
+                self.agent.latencies = np.append(self.agent.latencies, observed_latency)
 
                 self.log_latency_to_file(
                     request=request,
@@ -823,40 +819,12 @@ class Controller:
 
         except Exception as e:
             print(f"[CONTROLLER, TEST ERROR] {type(e).__name__} - {e}")
+        self.agent.epsilon_curve = np.append(
+            self.agent.epsilon_curve, self.agent.epsilon
+        )
 
     def generate_testing_plots(self):
-        """
-        Plot testing results:
-        - reward
-        - latency
-        """
-
-        import matplotlib.pyplot as plt
-
-        save_dir = Path(constants.training_log_folder) / "testing_results"
-        save_dir.mkdir(parents=True, exist_ok=True)
-
-        # Reward plot
-        plt.figure(figsize=(10, 5))
-        plt.plot(self.testing_rewards)
-        plt.xlabel("Request Number")
-        plt.ylabel("Reward")
-        plt.title("Testing Reward")
-        plt.grid(True)
-        plt.savefig(save_dir / "testing_rewards.png")
-        plt.close()
-
-        # Latency plot
-        plt.figure(figsize=(10, 5))
-        plt.plot(self.testing_latencies)
-        plt.xlabel("Request Number")
-        plt.ylabel("Latency (ms)")
-        plt.title("Testing Latency")
-        plt.grid(True)
-        plt.savefig(save_dir / "testing_latencies.png")
-        plt.close()
-
-        print(f"[CONTROLLER] Testing plots saved to {save_dir}")
+        pass
 
     def generate_plots(self):
         """
@@ -1035,11 +1003,8 @@ class Controller:
                         # ---- Testing phase: pure exploitation, no training ----
                         if self.testing_phase_active:
                             self.run_testing_phase(request)
-                            continue
-
-                        # Process this chunk as one STEP
-
-                        self.process_step(request)
+                        else:
+                            self.process_step(request)
 
                         # request combination type
                         combination = request.combination[0]

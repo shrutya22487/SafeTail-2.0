@@ -491,6 +491,13 @@ class DQNAgent:
         ax4 = plt.subplot(3, 3, 4)
         if len(self.rewards) > 0:
             ax4.plot(self.rewards, color='purple', alpha=0.6, linewidth=1.5)
+            if hasattr(self, "testing_start_index"):
+                ax4.axvline(
+                    x=self.testing_start_index,
+                    color='black',
+                    linestyle='--',
+                    linewidth=1
+                )
             ax4.axhline(y=np.mean(self.rewards), color='red', linestyle='--',
                         label=f'Mean: {np.mean(self.rewards):.2f}', linewidth=2)
             ax4.set_xlabel('Training Iteration')
@@ -507,6 +514,13 @@ class DQNAgent:
         ax5 = plt.subplot(3, 3, 5)
         if len(self.latencies) > 0:
             ax5.plot(self.latencies, color='brown', alpha=0.6, linewidth=1.5)
+            if hasattr(self, "testing_start_index"):
+                ax5.axvline(
+                    x=self.testing_start_index,
+                    color='black',
+                    linestyle='--',
+                    linewidth=1
+                )
             ax5.axhline(y=self.median_computation_delay, color='red', linestyle='--',
                         label=f'Median: {self.median_computation_delay:.2f}', linewidth=2)
             ax5.set_xlabel('Step')
