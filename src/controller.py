@@ -79,7 +79,7 @@ class Controller:
         self.episode_deviations = []  # Track deviations per episode
 
         # ---------------- Post-epsilon-min phase ----------------
-        self.epsilon_min_reached = constants.epsilon_min_reached # flag: epsilon has hit its floor
+        self.epsilon_min_reached = constants.epsilon_min_reached  # flag: epsilon has hit its floor
         self.post_epsilon_steps = constants.post_epsilon_steps  # steps counted after epsilon_min reached
         self.post_epsilon_steps_target = constants.post_epsilon_steps_target  # run this many steps before saving + testing
         self.testing_phase_active = constants.testing_phase_active  # flag: we are now in the testing phase
@@ -629,7 +629,11 @@ class Controller:
 
         # Train agent once per episode (skip during testing phase)
         if self.testing_phase_active:
-            print(f"[CONTROLLER, EPISODE {self.current_episode}] Testing phase – skipping training.")
+            episodic_reward = self.compute_episodic_reward()
+
+            self.agent.rewards = np.append(self.agent.rewards, episodic_reward)
+
+            print(f"[TEST EPISODE {self.current_episode}] Reward={episodic_reward:.3f}")
         elif len(self.agent.memory) >= self.agent.batch_size:
             print(f"[CONTROLLER, EPISODE {self.current_episode}] Training agent...")
             self.agent.experience_replay(self.agent.batch_size)
@@ -729,7 +733,7 @@ class Controller:
         self.agent.epsilon = 0.0
 
         # mark boundary between training and testing for plotting
-        self.agent.testing_start_index = len(self.agent.epsilon_curve)
+        self.agent.testing_start_index = len(self.agent.reward)
 
         self.testing_request_count = 0
         self.testing_request_limit = 3000
@@ -739,12 +743,6 @@ class Controller:
         print("=" * 60 + "\n")
 
     def run_testing_phase(self, request):
-        """
-        Pure testing phase.
-        - epsilon = 0 (greedy)
-        - no training
-        - metrics appended to training arrays
-        """
 
         if self.testing_request_count >= self.testing_request_limit:
             print("[CONTROLLER] ✅ Testing finished.")
@@ -755,6 +753,7 @@ class Controller:
         print(f"[CONTROLLER, TEST] Processing request {getattr(request, 'request_id', '?')}")
 
         try:
+
             load = self.find_free_servers()
             request.load = np.array(load)
 
@@ -775,53 +774,42 @@ class Controller:
 
             request.step_reward_list = self.compute_step_reward(request)
 
-            # greedy action (epsilon = 0)
+            # epsilon = 0 (greedy policy)
+            self.agent.epsilon = 0
             action_subset, action_index = self.agent.get_action(request)
 
             request.queue_waiting_time = time.time() * 1000.0 - request.arrival_time
+            self.average_waiting_times.append(request.queue_waiting_time)
 
             l = []
 
             for i in action_subset:
                 _, _, processing_time, combined_str = self.server_list[i].schedule_request(request)
-
                 request_total_delay[i] = float(processing_time) * 1000.0
                 l.append([request_total_delay[i], combined_str])
 
             request.total_processing_delay = np.array(request_total_delay)
 
             final_reward_list = self.compute_step_reward(request, action_subset)
-            combined_reward = np.mean(final_reward_list)
+            combined_step_reward = np.mean(final_reward_list)
+
+            self.step_rewards.append(combined_step_reward)
 
             if len(l) > 0:
                 observed_latency = sorted(l)[0][0]
                 request.combination = sorted(l)[0][1]
 
-                # Append metrics to training arrays
-                self.agent.rewards = np.append(self.agent.rewards, combined_reward)
-                self.agent.latencies = np.append(self.agent.latencies, observed_latency)
-
-                self.log_latency_to_file(
-                    request=request,
-                    observed_latency=observed_latency,
-                    action_subset=action_subset,
-                    episode=self.current_episode,
-                    step=self.current_step
-                )
-
-            print(
-                f"[TEST] Request {self.testing_request_count + 1}/3000 "
-                f"Reward={combined_reward:.3f}"
-            )
+                self.episode_latencies.append(observed_latency)
+                deviation = abs(observed_latency - self.agent.median_computation_delay)
+                self.episode_deviations.append(deviation)
 
             self.testing_request_count += 1
             self.current_step += 1
 
         except Exception as e:
             print(f"[CONTROLLER, TEST ERROR] {type(e).__name__} - {e}")
-        self.agent.epsilon_curve = np.append(
-            self.agent.epsilon_curve, self.agent.epsilon
-        )
+
+        self.agent.epsilon_curve = np.append(self.agent.epsilon_curve, self.agent.epsilon)
 
     def generate_testing_plots(self):
         pass
@@ -884,13 +872,13 @@ class Controller:
                 show_plot=False
             )
 
-            # 3. Detailed metrics summary
-            self.agent.save_metrics_summary(
-                final_dir / f"final_summary_{timestamp}.txt"
-            )
+            # # 3. Detailed metrics summary
+            # self.agent.save_metrics_summary(
+            #     final_dir / f"final_summary_{timestamp}.txt"
+            # )
 
-            # 4. Export training data to CSV for external analysis
-            self.export_training_data(final_dir / f"training_data_{timestamp}.csv")
+            # # 4. Export training data to CSV for external analysis
+            # self.export_training_data(final_dir / f"training_data_{timestamp}.csv")
 
             print(f"[CONTROLLER] ✅ Final plots saved to {final_dir}")
             print("=" * 60 + "\n")
@@ -902,49 +890,50 @@ class Controller:
         """
         Export all training metrics to CSV for external analysis.
         """
-        try:
-            # Determine the maximum length
-            max_len = max(
-                len(self.agent.loss),
-                len(self.agent.val_loss),
-                len(self.agent.epsilon_curve),
-                len(self.agent.rewards),
-                len(self.agent.latencies),
-                len(self.agent.deviations),
-                len(self.agent.episode_access_rate),
-                len(self.agent.exploit_or_explore),
-                len(self.agent.prediction_times)
-            )
+        # try:
+        #     # Determine the maximum length
+        #     max_len = max(
+        #         len(self.agent.loss),
+        #         len(self.agent.val_loss),
+        #         len(self.agent.epsilon_curve),
+        #         len(self.agent.rewards),
+        #         len(self.agent.latencies),
+        #         len(self.agent.deviations),
+        #         len(self.agent.episode_access_rate),
+        #         len(self.agent.exploit_or_explore),
+        #         len(self.agent.prediction_times)
+        #     )
 
-            # Helper to pad arrays
-            def pad_to_length(arr, length, fill_value=np.nan):
-                if len(arr) < length:
-                    if isinstance(arr, np.ndarray):
-                        return np.concatenate([arr, np.full(length - len(arr), fill_value)])
-                    else:
-                        return list(arr) + [fill_value] * (length - len(arr))
-                return arr
+        #     # Helper to pad arrays
+        #     def pad_to_length(arr, length, fill_value=np.nan):
+        #         if len(arr) < length:
+        #             if isinstance(arr, np.ndarray):
+        #                 return np.concatenate([arr, np.full(length - len(arr), fill_value)])
+        #             else:
+        #                 return list(arr) + [fill_value] * (length - len(arr))
+        #         return arr
 
-            # Create DataFrame
-            data = {
-                "episode": range(max_len),
-                "loss": pad_to_length(self.agent.loss, max_len),
-                "val_loss": pad_to_length(self.agent.val_loss, max_len),
-                "epsilon": pad_to_length(self.agent.epsilon_curve, max_len),
-                "reward": pad_to_length(self.agent.rewards, max_len),
-                "latency": pad_to_length(self.agent.latencies, max_len),
-                "deviation": pad_to_length(self.agent.deviations, max_len),
-                "access_rate": pad_to_length(self.agent.episode_access_rate, max_len),
-                "strategy": pad_to_length(self.agent.exploit_or_explore, max_len, fill_value=""),
-                "prediction_time": pad_to_length(self.agent.prediction_times, max_len),
-            }
+        #     # Create DataFrame
+        #     data = {
+        #         "episode": range(max_len),
+        #         "loss": pad_to_length(self.agent.loss, max_len),
+        #         "val_loss": pad_to_length(self.agent.val_loss, max_len),
+        #         "epsilon": pad_to_length(self.agent.epsilon_curve, max_len),
+        #         "reward": pad_to_length(self.agent.rewards, max_len),
+        #         "latency": pad_to_length(self.agent.latencies, max_len),
+        #         "deviation": pad_to_length(self.agent.deviations, max_len),
+        #         "access_rate": pad_to_length(self.agent.episode_access_rate, max_len),
+        #         "strategy": pad_to_length(self.agent.exploit_or_explore, max_len, fill_value=""),
+        #         "prediction_time": pad_to_length(self.agent.prediction_times, max_len),
+        #     }
 
-            df = pd.DataFrame(data)
-            df.to_csv(filepath, index=False)
-            print(f"[CONTROLLER] 💾 Training data exported to {filepath}")
+        #     df = pd.DataFrame(data)
+        #     df.to_csv(filepath, index=False)
+        #     print(f"[CONTROLLER] 💾 Training data exported to {filepath}")
 
-        except Exception as e:
-            print(f"[CONTROLLER] ⚠️ Failed to export training data: {type(e).__name__} - {e}")
+        # except Exception as e:
+        #     print(f"[CONTROLLER] ⚠️ Failed to export training data: {type(e).__name__} - {e}")
+        pass
 
     def save_checkpoint(self):
         """Save model and metrics."""
@@ -1003,8 +992,8 @@ class Controller:
                         # ---- Testing phase: pure exploitation, no training ----
                         if self.testing_phase_active:
                             self.run_testing_phase(request)
-                        else:
-                            self.process_step(request)
+                            continue
+                        self.process_step(request)
 
                         # request combination type
                         combination = request.combination[0]

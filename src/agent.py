@@ -615,72 +615,73 @@ class DQNAgent:
         Args:
             filepath (str): Path to save the summary file.
         """
-        filepath = Path(filepath)
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(filepath, 'w') as f:
-            f.write("=" * 80 + "\n")
-            f.write("DQN AGENT TRAINING METRICS SUMMARY\n")
-            f.write("=" * 80 + "\n\n")
-
-            # Loss statistics
-            if len(self.loss) > 0:
-                f.write("TRAINING LOSS:\n")
-                f.write(f"  Mean: {np.mean(self.loss):.6f}\n")
-                f.write(f"  Std:  {np.std(self.loss):.6f}\n")
-                f.write(f"  Min:  {np.min(self.loss):.6f}\n")
-                f.write(f"  Max:  {np.max(self.loss):.6f}\n")
-                f.write(f"  Final: {self.loss[-1]:.6f}\n\n")
-
-            if len(self.val_loss) > 0:
-                f.write("VALIDATION LOSS:\n")
-                f.write(f"  Mean: {np.mean(self.val_loss):.6f}\n")
-                f.write(f"  Std:  {np.std(self.val_loss):.6f}\n")
-                f.write(f"  Min:  {np.min(self.val_loss):.6f}\n")
-                f.write(f"  Max:  {np.max(self.val_loss):.6f}\n")
-                f.write(f"  Final: {self.val_loss[-1]:.6f}\n\n")
-
-            # Rewards
-            if len(self.rewards) > 0:
-                f.write("REWARDS:\n")
-                f.write(f"  Mean: {np.mean(self.rewards):.6f}\n")
-                f.write(f"  Std:  {np.std(self.rewards):.6f}\n")
-                f.write(f"  Min:  {np.min(self.rewards):.6f}\n")
-                f.write(f"  Max:  {np.max(self.rewards):.6f}\n\n")
-
-            # Latencies
-            if len(self.latencies) > 0:
-                f.write("LATENCIES:\n")
-                f.write(f"  Mean: {np.mean(self.latencies):.6f}\n")
-                f.write(f"  Std:  {np.std(self.latencies):.6f}\n")
-                f.write(f"  Min:  {np.min(self.latencies):.6f}\n")
-                f.write(f"  Max:  {np.max(self.latencies):.6f}\n")
-                f.write(f"  Median Baseline: {self.median_computation_delay:.6f}\n\n")
-
-            # Exploration stats
-            if len(self.exploit_or_explore) > 0:
-                unique, counts = np.unique(self.exploit_or_explore, return_counts=True)
-                f.write("EXPLORATION vs EXPLOITATION:\n")
-                for action, count in zip(unique, counts):
-                    f.write(f"  {action}: {count} ({100 * count / len(self.exploit_or_explore):.2f}%)\n")
-                f.write("\n")
-
-            # Prediction times
-            if len(self.prediction_times) > 0:
-                f.write("PREDICTION TIMES:\n")
-                f.write(f"  Mean: {np.mean(self.prediction_times):.6f}s\n")
-                f.write(f"  Std:  {np.std(self.prediction_times):.6f}s\n")
-                f.write(f"  Min:  {np.min(self.prediction_times):.6f}s\n")
-                f.write(f"  Max:  {np.max(self.prediction_times):.6f}s\n\n")
-
-            # Memory usage
-            f.write("REPLAY MEMORY:\n")
-            f.write(f"  Current size: {len(self.memory)}\n")
-            f.write(f"  Max capacity: {self.memory.maxlen}\n\n")
-
-            # Final epsilon
-            f.write("EPSILON:\n")
-            f.write(f"  Final value: {self.epsilon:.6f}\n")
-            f.write(f"  Min threshold: {self.epsilon_min:.6f}\n")
-
-        print(f"[AGENT] Metrics summary saved to {filepath}")
+        # filepath = Path(filepath)
+        # filepath.parent.mkdir(parents=True, exist_ok=True)
+        #
+        # with open(filepath, 'w') as f:
+        #     f.write("=" * 80 + "\n")
+        #     f.write("DQN AGENT TRAINING METRICS SUMMARY\n")
+        #     f.write("=" * 80 + "\n\n")
+        #
+        #     # Loss statistics
+        #     if len(self.loss) > 0:
+        #         f.write("TRAINING LOSS:\n")
+        #         f.write(f"  Mean: {np.mean(self.loss):.6f}\n")
+        #         f.write(f"  Std:  {np.std(self.loss):.6f}\n")
+        #         f.write(f"  Min:  {np.min(self.loss):.6f}\n")
+        #         f.write(f"  Max:  {np.max(self.loss):.6f}\n")
+        #         f.write(f"  Final: {self.loss[-1]:.6f}\n\n")
+        #
+        #     if len(self.val_loss) > 0:
+        #         f.write("VALIDATION LOSS:\n")
+        #         f.write(f"  Mean: {np.mean(self.val_loss):.6f}\n")
+        #         f.write(f"  Std:  {np.std(self.val_loss):.6f}\n")
+        #         f.write(f"  Min:  {np.min(self.val_loss):.6f}\n")
+        #         f.write(f"  Max:  {np.max(self.val_loss):.6f}\n")
+        #         f.write(f"  Final: {self.val_loss[-1]:.6f}\n\n")
+        #
+        #     # Rewards
+        #     if len(self.rewards) > 0:
+        #         f.write("REWARDS:\n")
+        #         f.write(f"  Mean: {np.mean(self.rewards):.6f}\n")
+        #         f.write(f"  Std:  {np.std(self.rewards):.6f}\n")
+        #         f.write(f"  Min:  {np.min(self.rewards):.6f}\n")
+        #         f.write(f"  Max:  {np.max(self.rewards):.6f}\n\n")
+        #
+        #     # Latencies
+        #     if len(self.latencies) > 0:
+        #         f.write("LATENCIES:\n")
+        #         f.write(f"  Mean: {np.mean(self.latencies):.6f}\n")
+        #         f.write(f"  Std:  {np.std(self.latencies):.6f}\n")
+        #         f.write(f"  Min:  {np.min(self.latencies):.6f}\n")
+        #         f.write(f"  Max:  {np.max(self.latencies):.6f}\n")
+        #         f.write(f"  Median Baseline: {self.median_computation_delay:.6f}\n\n")
+        #
+        #     # Exploration stats
+        #     if len(self.exploit_or_explore) > 0:
+        #         unique, counts = np.unique(self.exploit_or_explore, return_counts=True)
+        #         f.write("EXPLORATION vs EXPLOITATION:\n")
+        #         for action, count in zip(unique, counts):
+        #             f.write(f"  {action}: {count} ({100 * count / len(self.exploit_or_explore):.2f}%)\n")
+        #         f.write("\n")
+        #
+        #     # Prediction times
+        #     if len(self.prediction_times) > 0:
+        #         f.write("PREDICTION TIMES:\n")
+        #         f.write(f"  Mean: {np.mean(self.prediction_times):.6f}s\n")
+        #         f.write(f"  Std:  {np.std(self.prediction_times):.6f}s\n")
+        #         f.write(f"  Min:  {np.min(self.prediction_times):.6f}s\n")
+        #         f.write(f"  Max:  {np.max(self.prediction_times):.6f}s\n\n")
+        #
+        #     # Memory usage
+        #     f.write("REPLAY MEMORY:\n")
+        #     f.write(f"  Current size: {len(self.memory)}\n")
+        #     f.write(f"  Max capacity: {self.memory.maxlen}\n\n")
+        #
+        #     # Final epsilon
+        #     f.write("EPSILON:\n")
+        #     f.write(f"  Final value: {self.epsilon:.6f}\n")
+        #     f.write(f"  Min threshold: {self.epsilon_min:.6f}\n")
+        #
+        # print(f"[AGENT] Metrics summary saved to {filepath}")
+        pass
