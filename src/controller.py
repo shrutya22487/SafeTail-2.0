@@ -495,50 +495,53 @@ class Controller:
         final_rewards = self.compute_step_reward(request, action_subset)
         combined_step_reward = np.mean(final_rewards)
 
-        if len(action_subset) > 0:
+        # ----------------------------------
+        # ROBUST latency selection (FIX)
+        # ----------------------------------
+        if len(action_subset) > 0 and len(l) > 0:
 
-            valid_servers = [
-                i for i in action_subset
-                if request.total_processing_delay[i] >= 0
+            # Filter valid entries from scheduled servers
+            valid_entries = [
+                (delay, comb) for delay, comb in l if delay >= 0
             ]
 
-            if len(valid_servers) > 0:
+            # If nothing valid → fallback to first available
+            if len(valid_entries) == 0:
+                best_delay, best_comb = l[0]
+                best_idx = action_subset[0]
+            else:
+                best_delay, best_comb = min(valid_entries, key=lambda x: x[0])
 
-                best_idx = min(
-                    valid_servers,
-                    key=lambda i: request.total_processing_delay[i]
+                # map back to index
+                best_idx = next(
+                    i for i in action_subset
+                    if request.total_processing_delay[i] == best_delay
                 )
 
-                observed_latency = float(request.total_processing_delay[best_idx])
+            observed_latency = float(best_delay)
 
-                if observed_latency >= 0:
-                    # correct combined_str
-                    best_entry = min(
-                        l,
-                        key=lambda x: x[0] if x[0] >= 0 else float('inf')
-                    )
-                    request_type = best_entry[1]
+            # Always log (NO SKIP)
+            computation = request_computation[best_idx]
+            propagation = request_propagation[best_idx]
+            transmission = request_transmission[best_idx]
+            queueing = request.queue_waiting_time
 
-                    computation = request_computation[best_idx]
-                    propagation = request_propagation[best_idx]
-                    transmission = request_transmission[best_idx]
-                    queueing = request.queue_waiting_time
+            total_latency = computation + propagation + transmission + queueing
 
-                    total_latency = computation + propagation + transmission + queueing
+            self.log_latency_to_csv(
+                request=request,
+                computation_delay=computation,
+                propagation_delay=propagation,
+                transmission_delay=transmission,
+                queueing_delay=queueing,
+                total_latency=total_latency,
+            )
 
-                    self.log_latency_to_csv(
-                        request=request,
-                        computation_delay=computation,
-                        propagation_delay=propagation,
-                        transmission_delay=transmission,
-                        queueing_delay=queueing,
-                        total_latency=total_latency,
-                    )
+            # Always append (NO SKIP)
+            self.episode_latencies.append(observed_latency)
 
-                    self.episode_latencies.append(observed_latency)
-
-                    deviation = abs(observed_latency - self.agent.median_computation_delay)
-                    self.episode_deviations.append(deviation)
+            deviation = abs(observed_latency - self.agent.median_computation_delay)
+            self.episode_deviations.append(deviation)
 
         print(f"[CONTROLLER, STEP {self.current_step}] Completed. Reward: {combined_step_reward:.3f}")
 
