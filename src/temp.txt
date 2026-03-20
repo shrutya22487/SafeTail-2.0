@@ -1,10 +1,9 @@
 Prop:
 
-Min prop 2
+Min prop 1
 T, P, C
-2, 3, 4
-3, 4, 1
-6, 7, 8
+2, 3, 4000= 4005
+3, 4, 1 = 8
 
 
 action_subset -> schedule request on all servers -> take x scheduled requests which have min prop delay -> take min of all of them

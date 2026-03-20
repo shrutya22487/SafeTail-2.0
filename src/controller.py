@@ -747,7 +747,8 @@ class Controller:
         except Exception as e:
             print(f"[CONTROLLER] ⚠️ Failed to save model: {type(e).__name__} - {e}")
 
-        self.testing_phase_active = True
+        self.testing_phase_active = False
+
         self.agent.epsilon = 0.0
 
         # mark boundary between training and testing for plotting
@@ -759,75 +760,75 @@ class Controller:
         print("\n" + "=" * 60)
         print("[CONTROLLER] 🧪 ENTERING TESTING PHASE (3000 requests)")
         print("=" * 60 + "\n")
-        exit(0)
+
 
     def run_testing_phase(self, request):
-
-        if self.testing_request_count >= self.testing_request_limit:
-            print("[CONTROLLER] ✅ Testing finished.")
-            self.generate_final_plots()
-            self.training_done.set()
-            return
-
-        print(f"[CONTROLLER, TEST] Processing request {getattr(request, 'request_id', '?')}")
-
-        try:
-            load = self.find_free_servers()
-            request.load = np.array(load)
-
-            request_total_delay = []
-            combined_strs = []
-
-            for i in range(self.num_servers):
-                delay, combined_str = self.server_list[i].compute_request_time(request)
-                request_total_delay.append(delay)
-                combined_strs.append(combined_str)
-
-            request.total_processing_delay = np.array(request_total_delay)
-            request_total_delay = [float(-1)] * self.num_servers
-
-            for i in range(len(combined_strs)):
-                if combined_strs[i] is not None:
-                    request.populate_request_from_csv(i, combined_strs[i])
-
-            request.step_reward_list = self.compute_step_reward(request)
-
-            # epsilon = 0 (greedy policy)
-            self.agent.epsilon = 0
-            action_subset, action_index = self.agent.get_action(request)
-
-            request.queue_waiting_time = time.time() * 1000.0 - request.arrival_time
-            self.average_waiting_times.append(request.queue_waiting_time)
-
-            l = []
-
-            for i in action_subset:
-                _, _, processing_time, combined_str = self.server_list[i].schedule_request(request)
-                request_total_delay[i] = float(processing_time) * 1000.0
-                l.append([request_total_delay[i], combined_str])
-
-            request.total_processing_delay = np.array(request_total_delay)
-
-            final_reward_list = self.compute_step_reward(request, action_subset)
-            combined_step_reward = np.mean(final_reward_list)
-
-            self.step_rewards.append(combined_step_reward)
-
-            if len(l) > 0:
-                observed_latency = sorted(l)[0][0]
-                request.combination = sorted(l)[0][1]
-
-                self.episode_latencies.append(observed_latency)
-                deviation = abs(observed_latency - self.agent.median_computation_delay)
-                self.episode_deviations.append(deviation)
-
-            self.testing_request_count += 1
-            self.current_step += 1
-
-        except Exception as e:
-            print(f"[CONTROLLER, TEST ERROR] {type(e).__name__} - {e}")
-
-        self.agent.epsilon_curve = np.append(self.agent.epsilon_curve, self.agent.epsilon)
+        # if self.testing_request_count >= self.testing_request_limit:
+        #     print("[CONTROLLER] ✅ Testing finished.")
+        #     self.generate_final_plots()
+        #     self.training_done.set()
+        #     return
+        #
+        # print(f"[CONTROLLER, TEST] Processing request {getattr(request, 'request_id', '?')}")
+        #
+        # try:
+        #     load = self.find_free_servers()
+        #     request.load = np.array(load)
+        #
+        #     request_total_delay = []
+        #     combined_strs = []
+        #
+        #     for i in range(self.num_servers):
+        #         delay, combined_str = self.server_list[i].compute_request_time(request)
+        #         request_total_delay.append(delay)
+        #         combined_strs.append(combined_str)
+        #
+        #     request.total_processing_delay = np.array(request_total_delay)
+        #     request_total_delay = [float(-1)] * self.num_servers
+        #
+        #     for i in range(len(combined_strs)):
+        #         if combined_strs[i] is not None:
+        #             request.populate_request_from_csv(i, combined_strs[i])
+        #
+        #     request.step_reward_list = self.compute_step_reward(request)
+        #
+        #     # epsilon = 0 (greedy policy)
+        #     self.agent.epsilon = 0
+        #     action_subset, action_index = self.agent.get_action(request)
+        #
+        #     request.queue_waiting_time = time.time() * 1000.0 - request.arrival_time
+        #     self.average_waiting_times.append(request.queue_waiting_time)
+        #
+        #     l = []
+        #
+        #     for i in action_subset:
+        #         _, _, processing_time, combined_str = self.server_list[i].schedule_request(request)
+        #         request_total_delay[i] = float(processing_time) * 1000.0
+        #         l.append([request_total_delay[i], combined_str])
+        #
+        #     request.total_processing_delay = np.array(request_total_delay)
+        #
+        #     final_reward_list = self.compute_step_reward(request, action_subset)
+        #     combined_step_reward = np.mean(final_reward_list)
+        #
+        #     self.step_rewards.append(combined_step_reward)
+        #
+        #     if len(l) > 0:
+        #         observed_latency = sorted(l)[0][0]
+        #         request.combination = sorted(l)[0][1]
+        #
+        #         self.episode_latencies.append(observed_latency)
+        #         deviation = abs(observed_latency - self.agent.median_computation_delay)
+        #         self.episode_deviations.append(deviation)
+        #
+        #     self.testing_request_count += 1
+        #     self.current_step += 1
+        #
+        # except Exception as e:
+        #     print(f"[CONTROLLER, TEST ERROR] {type(e).__name__} - {e}")
+        #
+        # self.agent.epsilon_curve = np.append(self.agent.epsilon_curve, self.agent.epsilon)
+        pass
 
     def generate_testing_plots(self):
         pass
