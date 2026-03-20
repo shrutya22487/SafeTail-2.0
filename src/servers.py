@@ -210,12 +210,20 @@ class Server:
 
         self.update_active_requests(current_time=current_time)
         if self.num_requests >= MAX_CONCURRENT_REQUESTS:
-            estimated_proc, _ = self.compute_request_time(request)
-            return False, "server full", estimated_proc
+            (total_delay,
+            combined_str,
+            computation_delay_for_node,
+            propagation_delay_for_node,
+            tramission_delay_for_node) = self.compute_request_time(request)
+            return False, "server full", total_delay
 
-        proc_time, combined_str = self.compute_request_time(request)
+        (total_delay,
+         combined_str,
+         computation_delay_for_node,
+         propagation_delay_for_node,
+         tramission_delay_for_node) = self.compute_request_time(request)
         start_time = current_time
-        finish_time = start_time + proc_time
+        finish_time = start_time + total_delay
 
         request.combination = combined_str
 
@@ -223,16 +231,16 @@ class Server:
         self.active_requests.append({
             'request': request,
             'start_time': start_time,
-            'proc_time': proc_time,
+            'proc_time': total_delay,
             'finish_time': finish_time
         })
         self.num_requests += 1
 
-        if do_sleep and proc_time > 0:
-            time.sleep(proc_time)
+        if do_sleep and total_delay > 0:
+            time.sleep(total_delay)
             self.update_active_requests(current_time=time.time())
 
-        return True, finish_time, proc_time, combined_str
+        return True, finish_time, total_delay, combined_str, computation_delay_for_node,propagation_delay_for_node,tramission_delay_for_node
 
     # ---------- Remaining helpers ----------
     def update_active_requests(self, current_time: float = None):
