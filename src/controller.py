@@ -13,7 +13,7 @@ from agent import DQNAgent
 
 class Controller:
     def __init__(self, num_servers=5, steps_per_episode=10, chunks_per_episode=3):
-
+        self.access_rate_log = []  # [(episode, avg_access_rate)]
         self.testing_phase_active = False
         self.testing_request_limit = 3000
         self.testing_request_count = 0
@@ -488,7 +488,7 @@ class Controller:
 
         # agent action
         try:
-            action_subset, action_index = self.agent.get_action(request)
+            action_subset, action_index = self.agent.get_action(request) # random.choice(servers, num_servers)
         except Exception as e:
             print(f"[CONTROLLER, !] Agent failed to produce action: {type(e).__name__} - {e}")
             return
@@ -515,7 +515,10 @@ class Controller:
                     f"{type(e).__name__} - {e}"
                 )
                 print(1e9)
-
+        ######################################
+        # FILTER REUQESTS WITH MIN PROPAGATION DELAY
+        # modify l to store only the filtered requests
+        #######################################
         # Store actual total_delay in request for each server for reward calculation and tracking
         request.total_processing_delay = np.array(request_total_delay)
 
@@ -682,7 +685,20 @@ class Controller:
         # Checkpoint every N episodes
         # if self.current_episode % 10 == 0:
         #     self.save_checkpoint()
+        # -------- ACCESS RATE LOGGING --------
+        if len(self.agent.episode_access_rate) > 0:
+            avg_access_rate = np.mean(self.agent.episode_access_rate)
+        else:
+            avg_access_rate = 0.0
 
+        self.access_rate_log.append((self.current_episode, avg_access_rate))
+
+        try:
+            df = pd.DataFrame(self.access_rate_log, columns=["episode", "access_rate"])
+            csv_path = Path(constants.training_log_folder) / "access_rate_log.csv"
+            df.to_csv(csv_path, index=False)
+        except Exception as e:
+            print(f"[CONTROLLER] Failed to save access rate CSV: {e}")
         # Reset episode-level tracking
         self.step_experiences = []
         self.step_rewards = []

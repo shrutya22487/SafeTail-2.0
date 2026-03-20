@@ -1,0 +1,14 @@
+Prop:
+
+Min prop 2
+T, P, C
+2, 3, 4
+3, 4, 1
+6, 7, 8
+
+
+action_subset -> schedule request on all servers -> take x scheduled requests which have min prop delay -> take min of all of them
+
+Min Load - 2
+
+combined_str -> length (filtering criteria) -> take top 2 requests with min load on servers
