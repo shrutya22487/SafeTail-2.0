@@ -84,57 +84,50 @@ class Controller:
         self.post_epsilon_steps_target = constants.post_epsilon_steps_target  # run this many steps before saving + testing
         self.testing_phase_active = constants.testing_phase_active  # flag: we are now in the testing phase
 
-        latency_log_path = Path(constants.training_log_folder + "/plots") / ".." / "latency_log.txt"
-        latency_log_path = latency_log_path.resolve()
-        with open(latency_log_path, "w") as f:
-            f.write("LATENCY LOG\n")
-            f.write("=" * 100 + "\n")
-            f.write(f"{'[EP | STEP]':<20} {'Req':<12} {'Type':<6} {'Servers':<15} "
-                    f"{'Latency(ms)':<14} {'QueueWait(ms)':<16} {'Total(ms)':<12} "
-                    f"{'D1':<8} {'D2':<8} {'Satisfaction':<12} Arrival\n")
-            f.write("=" * 100 + "\n")
+        self.latency_log_path = (
+                Path(constants.training_log_folder) / "latency_log.csv"
+        ).resolve()
+
+        # Create CSV with header
+        with open(self.latency_log_path, "w") as f:
+            f.write(
+                "request_id,request_type,computation_delay,propagation_delay,"
+                "transmission_delay,queueing_delay,total_latency\n"
+            )
 
     # ------------------------------------------------------------
     # Utility
     # ------------------------------------------------------------
-    def log_latency_to_file(self, request, observed_latency, action_subset, episode, step):
+    def log_latency_to_csv(
+            self,
+            request,
+            computation_delay,
+            propagation_delay,
+            transmission_delay,
+            queueing_delay,
+            total_latency,
+    ):
         """
-        Append latency + request details to a structured text log file.
+        Logs latency components per request into CSV.
         """
-        log_path = self.plot_dir.parent / "latency_log.txt"
 
         try:
-            combination = getattr(request, 'combination', ['?'])
-            request_id = getattr(request, 'request_id', 'unknown')
-            arrival = getattr(request, 'arrival_time', 'N/A')
-            queue_wait = getattr(request, 'queue_waiting_time', -1.0)
+            request_id = getattr(request, "request_id", "unknown")
+            request_type = getattr(request, "combination", "?")
 
-            # Deadline thresholds for reference
-            D1, D2 = self.deadlines[0] if combination == "s" else self.deadlines[1]
-
-            # Satisfaction label
-            if observed_latency <= D1:
-                satisfaction = "FULL"
-            elif observed_latency <= D2:
-                satisfaction = "PARTIAL"
-            else:
-                satisfaction = "MISSED"
-
-            with open(log_path, "a") as f:
+            with open(self.latency_log_path, "a") as f:
                 f.write(
-                    f"[EP {episode:04d} | STEP {step:04d}] "
-                    f"Req={request_id} | "
-                    f"Type={combination} | "
-                    f"Servers={list(action_subset)} | "
-                    f"Latency={observed_latency:.3f} ms | "
-                    f"QueueWait={queue_wait:.3f} ms | "
-                    f"Total={observed_latency + queue_wait:.3f} ms | "
-                    f"D1={D1} ms | D2={D2} ms | "
-                    f"Satisfaction={satisfaction} | "
-                    f"Arrival={arrival}\n"
+                    f"{request_id},"
+                    f"{request_type},"
+                    f"{computation_delay:.6f},"
+                    f"{propagation_delay:.6f},"
+                    f"{transmission_delay:.6f},"
+                    f"{queueing_delay:.6f},"
+                    f"{total_latency:.6f}\n"
                 )
+
         except Exception as e:
-            print(f"[CONTROLLER] ⚠️ Failed to write latency log: {type(e).__name__} - {e}")
+            print(f"[CONTROLLER] ⚠️ CSV logging failed: {type(e).__name__} - {e}")
 
     def find_free_servers(self):
         now = time.time()
@@ -420,10 +413,7 @@ class Controller:
         return episodic_reward
 
     def process_step(self, request):
-        """
-        Process one step (ONE STEP = processing ONE request).
-        Collects experiences but doesn't train yet.
-        """
+
         try:
             print(f"\n[CONTROLLER, STEP {self.current_step}] Processing request {request.request_id}.")
         except Exception:
@@ -439,162 +429,149 @@ class Controller:
         if num_free == 0:
             print("[CONTROLLER, QUEUE] All servers busy. Retrying shortly.")
             time.sleep(0.1)
-            # try once more
             self.process_step(request)
             return
 
-        # update request state
         try:
             request.load = np.array(load)
+
             request_total_delay = []
             combined_strs = []
+
+            # NEW: store components
+            request_computation = [0.0] * self.num_servers
+            request_propagation = [0.0] * self.num_servers
+            request_transmission = [0.0] * self.num_servers
+
         except Exception as e:
             print(f"[CONTROLLER, !] Failed to update request state: {type(e).__name__} - {e}")
             return
 
+        # --------------------------------------------------
+        # Compute delays (UPDATED)
+        # --------------------------------------------------
         for i in range(self.num_servers):
             try:
-                delay, combined_str = self.server_list[i].compute_request_time(request)
+                delay, combined_str, comp, prop, trans = \
+                    self.server_list[i].compute_request_time(request)
+
                 request_total_delay.append(delay)
                 combined_strs.append(combined_str)
+
+                request_computation[i] = comp * 1000
+                request_propagation[i] = prop * 1000
+                request_transmission[i] = trans * 1000
+
             except Exception as e:
-                print(
-                    f"[CONTROLLER, !] Error computing request time "
-                    f"for server {i + 1}: {type(e).__name__} - {e}"
-                )
-                request_total_delay.append(float(-1))  # Use -1 to indicate failure to compute delay for this server
+                print(f"[CONTROLLER, !] Error computing request time for server {i + 1}: {type(e).__name__} - {e}")
+                request_total_delay.append(float(-1))
                 combined_strs.append(None)
 
-        # Store estimated total_delay in request for each server for prediction of RL model
         request.total_processing_delay = np.array(request_total_delay)
-        request_total_delay = [float(
-            -1)] * self.num_servers  # reset to later use for tracking observed latency after action is taken (i.e. when request is scheduled and completed)
+        request_total_delay = [float(-1)] * self.num_servers
 
-        # Update request state to add data from servers
+        # --------------------------------------------------
+        # Populate request
+        # --------------------------------------------------
         for i in range(len(combined_strs)):
-            server_index = i
             try:
                 if combined_strs[i] is not None:
-                    request.populate_request_from_csv(server_index, combined_strs[i])
+                    request.populate_request_from_csv(i, combined_strs[i])
             except Exception as e:
-                print(
-                    f"[CONTROLLER, !] Failed to populate request from CSV "
-                    f"for server {server_index}: {type(e).__name__} - {e}"
-                )
+                print(f"[CONTROLLER, !] Failed CSV populate: {e}")
 
         try:
             request.step_reward_list = self.compute_step_reward(request)
-        except Exception as e:
-            print(f"[CONTROLLER, !] Failed to compute initial step reward: {type(e).__name__} - {e}")
-            request.step_reward_list = np.zeros(self.num_servers, dtype=float)
+        except Exception:
+            request.step_reward_list = np.zeros(self.num_servers)
 
-        # agent action
-        try:
-            action_subset, action_index = self.agent.get_action(request)
-        except Exception as e:
-            print(f"[CONTROLLER, !] Agent failed to produce action: {type(e).__name__} - {e}")
-            return
+        # --------------------------------------------------
+        # Agent action
+        # --------------------------------------------------
+        action_subset, action_index = self.agent.get_action(request)
 
-        # track the waiting time in the queue before request starts processing
-        try:
-            request.queue_waiting_time = time.time() * 1000.0 - request.arrival_time  # in ms
-            self.average_waiting_times.append(request.queue_waiting_time)
-        except Exception as e:
-            print(f"[CONTROLLER, !] Failed to compute waiting time: {type(e).__name__} - {e}")
-            request.queue_waiting_time = 0.0
+        # --------------------------------------------------
+        # Queue wait
+        # --------------------------------------------------
+        request.queue_waiting_time = time.time() * 1000.0 - request.arrival_time
+        self.average_waiting_times.append(request.queue_waiting_time)
+
         l = []
-        # assign request
+
         for i in action_subset:
             try:
                 _, _, processing_time, combined_str = self.server_list[i].schedule_request(request)
-                # Update observed processing time for this server (in ms)
+
                 request_total_delay[i] = float(processing_time) * 1000.0
                 l.append([request_total_delay[i], combined_str])
 
             except Exception as e:
-                print(
-                    f"[CONTROLLER, !] Failed to schedule request on server {i}: "
-                    f"{type(e).__name__} - {e}"
-                )
-                print(processing_time)
+                print(f"[CONTROLLER, !] Scheduling failed: {e}")
 
-        # Store actual total_delay in request for each server for reward calculation and tracking
         request.total_processing_delay = np.array(request_total_delay)
 
-        # compute reward and track latency metrics
+        # --------------------------------------------------
+        # Reward + LATENCY LOGGING (UPDATED)
+        # --------------------------------------------------
         try:
-            final_step_reward_list = self.compute_step_reward(request, action_subset)
-            combined_step_reward = np.mean(final_step_reward_list)
+            final_rewards = self.compute_step_reward(request, action_subset)
+            combined_step_reward = np.mean(final_rewards)
 
-            # Track observed latency (minimum among selected servers)
-            if len(action_subset) > 0 and hasattr(request, 'total_processing_delay'):
-                observed_latency = min(request.total_processing_delay[i] for i in action_subset
-                                       if i < len(request.total_processing_delay))
-            if len(action_subset) > 0 and hasattr(request, 'total_processing_delay'):
-                observed_latency = sorted(l)[0][0]
-                request.combination = sorted(l)[0][1]
-                self.episode_latencies.append(observed_latency)
-
-                # Track deviation from median
-                deviation = abs(observed_latency - self.agent.median_computation_delay)
-                self.episode_deviations.append(deviation)
-                self.log_latency_to_file(
-                    request=request,
-                    observed_latency=observed_latency,
-                    action_subset=action_subset,
-                    episode=self.current_episode,
-                    step=self.current_step
+            if len(action_subset) > 0:
+                best_idx = min(
+                    action_subset,
+                    key=lambda i: request.total_processing_delay[i]
                 )
 
+                computation = request_computation[best_idx]
+                propagation = request_propagation[best_idx]
+                transmission = request_transmission[best_idx]
+                queueing = request.queue_waiting_time
+
+                total_latency = computation + propagation + transmission + queueing
+
+                self.log_latency_to_csv(
+                    request=request,
+                    computation_delay=computation,
+                    propagation_delay=propagation,
+                    transmission_delay=transmission,
+                    queueing_delay=queueing,
+                    total_latency=total_latency,
+                )
+
+                observed_latency = request.total_processing_delay[best_idx]
+                self.episode_latencies.append(observed_latency)
+
+                deviation = abs(observed_latency - self.agent.median_computation_delay)
+                self.episode_deviations.append(deviation)
+
         except Exception as e:
-            print(f"[CONTROLLER, !] Failed to compute final step reward: {type(e).__name__} - {e}")
+            print(f"[CONTROLLER, !] Reward/logging error: {e}")
             combined_step_reward = 0.0
 
-        try:
-            print(
-                f"[CONTROLLER, STEP {self.current_step}] Completed. "
-                f"Step reward: {combined_step_reward:.3f}"
-            )
-        except Exception:
-            pass
+        print(f"[CONTROLLER, STEP {self.current_step}] Completed. Reward: {combined_step_reward:.3f}")
 
-        # store experience
-        try:
-            self.step_experiences.append({
-                "state": request,
-                "action": action_index,
-                "reward": combined_step_reward,
-                "next_state": request  # environment is partially observable anyway
-            })
-        except Exception as e:
-            print(f"[CONTROLLER, !] Failed to store experience: {type(e).__name__} - {e}")
+        # --------------------------------------------------
+        # Store experience
+        # --------------------------------------------------
+        self.step_experiences.append({
+            "state": request,
+            "action": action_index,
+            "reward": combined_step_reward,
+            "next_state": request
+        })
 
-        try:
-            self.step_rewards.append(combined_step_reward)
-            self.agent.epsilon_curve = np.append(
-                self.agent.epsilon_curve, self.agent.epsilon
-            )
-        except Exception as e:
-            print(f"[CONTROLLER, !] Failed to update reward/epsilon tracking: {type(e).__name__} - {e}")
+        self.step_rewards.append(combined_step_reward)
+        self.agent.epsilon_curve = np.append(self.agent.epsilon_curve, self.agent.epsilon)
 
         self.current_step += 1
 
-        # ---- Post-epsilon-min countdown ----
+        # epsilon logic (unchanged)
         if not self.epsilon_min_reached and self.agent.epsilon <= self.agent.epsilon_min:
             self.epsilon_min_reached = True
-            print(
-                f"[CONTROLLER] 🏁 Epsilon has reached its minimum value "
-                f"({self.agent.epsilon_min}). "
-                f"Running {self.post_epsilon_steps_target} more steps, "
-                f"then saving model and entering testing phase."
-            )
 
         if self.epsilon_min_reached and not self.testing_phase_active:
             self.post_epsilon_steps += 1
-            print(
-                f"[CONTROLLER] 📍 Post-epsilon-min step "
-                f"{self.post_epsilon_steps}/{self.post_epsilon_steps_target}"
-            )
             if self.post_epsilon_steps >= self.post_epsilon_steps_target:
                 self._save_and_enter_testing()
 
@@ -741,6 +718,7 @@ class Controller:
         print("\n" + "=" * 60)
         print("[CONTROLLER] 🧪 ENTERING TESTING PHASE (3000 requests)")
         print("=" * 60 + "\n")
+        exit(0)
 
     def run_testing_phase(self, request):
 
@@ -753,17 +731,30 @@ class Controller:
         print(f"[CONTROLLER, TEST] Processing request {getattr(request, 'request_id', '?')}")
 
         try:
-
             load = self.find_free_servers()
             request.load = np.array(load)
 
             request_total_delay = []
             combined_strs = []
 
+            # NEW: components
+            request_computation = [0.0] * self.num_servers
+            request_propagation = [0.0] * self.num_servers
+            request_transmission = [0.0] * self.num_servers
+
+            # ---------------------------------------------
+            # Compute delays (UPDATED)
+            # ---------------------------------------------
             for i in range(self.num_servers):
-                delay, combined_str = self.server_list[i].compute_request_time(request)
+                delay, combined_str, comp, prop, trans = \
+                    self.server_list[i].compute_request_time(request)
+
                 request_total_delay.append(delay)
                 combined_strs.append(combined_str)
+
+                request_computation[i] = comp * 1000
+                request_propagation[i] = prop * 1000
+                request_transmission[i] = trans * 1000
 
             request.total_processing_delay = np.array(request_total_delay)
             request_total_delay = [float(-1)] * self.num_servers
@@ -774,7 +765,6 @@ class Controller:
 
             request.step_reward_list = self.compute_step_reward(request)
 
-            # epsilon = 0 (greedy policy)
             self.agent.epsilon = 0
             action_subset, action_index = self.agent.get_action(request)
 
@@ -785,21 +775,45 @@ class Controller:
 
             for i in action_subset:
                 _, _, processing_time, combined_str = self.server_list[i].schedule_request(request)
+
                 request_total_delay[i] = float(processing_time) * 1000.0
                 l.append([request_total_delay[i], combined_str])
 
             request.total_processing_delay = np.array(request_total_delay)
 
-            final_reward_list = self.compute_step_reward(request, action_subset)
-            combined_step_reward = np.mean(final_reward_list)
+            final_rewards = self.compute_step_reward(request, action_subset)
+            combined_step_reward = np.mean(final_rewards)
 
             self.step_rewards.append(combined_step_reward)
 
-            if len(l) > 0:
-                observed_latency = sorted(l)[0][0]
-                request.combination = sorted(l)[0][1]
+            # ---------------------------------------------
+            # LATENCY LOGGING (UPDATED)
+            # ---------------------------------------------
+            if len(action_subset) > 0:
+                best_idx = min(
+                    action_subset,
+                    key=lambda i: request.total_processing_delay[i]
+                )
 
+                computation = request_computation[best_idx]
+                propagation = request_propagation[best_idx]
+                transmission = request_transmission[best_idx]
+                queueing = request.queue_waiting_time
+
+                total_latency = computation + propagation + transmission + queueing
+
+                self.log_latency_to_csv(
+                    request=request,
+                    computation_delay=computation,
+                    propagation_delay=propagation,
+                    transmission_delay=transmission,
+                    queueing_delay=queueing,
+                    total_latency=total_latency,
+                )
+
+                observed_latency = request.total_processing_delay[best_idx]
                 self.episode_latencies.append(observed_latency)
+
                 deviation = abs(observed_latency - self.agent.median_computation_delay)
                 self.episode_deviations.append(deviation)
 

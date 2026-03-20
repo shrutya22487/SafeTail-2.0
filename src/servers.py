@@ -1,4 +1,6 @@
 import random
+from typing import Any, Union
+
 import numpy as np
 import pickle
 import pandas as pd
@@ -159,7 +161,8 @@ class Server:
         return first_letter, combined_string
 
     # ---------- Public API ----------
-    def compute_request_time(self, request: user.Request) -> tuple[float, str]:
+    def compute_request_time(self, request: user.Request) -> tuple[
+        Union[float, Any], str, float, Union[float, Any], Union[float, Any]]:
         """
         Compute and return total delay for `request` WITHOUT scheduling it.
         Transmission uses FIXED_BANDWIDTH_KBPS when request does not provide load/bandwidth.
@@ -191,8 +194,13 @@ class Server:
         # print("computation_delay_for_node: ", computation_delay_for_node*1000)
 
         total_delay = propagation_delay_for_node + tramission_delay_for_node + computation_delay_for_node
-        return total_delay, combined_str
-
+        return (
+            total_delay,
+            combined_str,
+            computation_delay_for_node,
+            propagation_delay_for_node,
+            tramission_delay_for_node,
+        )
     def schedule_request(self, request: user.Request, current_time: float = None, do_sleep: bool = False):
         """
         Compute time, schedule request if capacity, return (success, finish_time_or_reason, proc_time).

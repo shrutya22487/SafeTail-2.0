@@ -521,8 +521,7 @@ class DQNAgent:
                     linestyle='--',
                     linewidth=1
                 )
-            ax5.axhline(y=self.median_computation_delay, color='red', linestyle='--',
-                        label=f'Median: {self.median_computation_delay:.2f}', linewidth=2)
+            ax5.axhline(y=self.median_computation_delay, color='red', linestyle='--', linewidth=2)
             ax5.set_xlabel('Step')
             ax5.set_ylabel('Latency (s)')
             ax5.set_title('Observed Latencies', fontweight='bold')
@@ -566,34 +565,34 @@ class DQNAgent:
             ax7.set_title('Latency Deviations from Median', fontweight='bold')
 
         # 8. Prediction Times
-        ax8 = plt.subplot(3, 3, 8)
-        if len(self.prediction_times) > 0:
-            ax8.plot(self.prediction_times, color='magenta', alpha=0.6, linewidth=1.5)
-            ax8.axhline(y=np.mean(self.prediction_times), color='green', linestyle='--',
-                        label=f'Mean: {np.mean(self.prediction_times):.4f}s', linewidth=2)
-            ax8.set_xlabel('Prediction Call')
-            ax8.set_ylabel('Time (seconds)')
-            ax8.set_title('Model Prediction Times', fontweight='bold')
-            ax8.legend()
-            ax8.grid(True, alpha=0.3)
-        else:
-            ax8.text(0.5, 0.5, 'No prediction time data yet', ha='center', va='center',
-                     fontsize=11, transform=ax8.transAxes, color='gray')
-            ax8.set_title('Model Prediction Times', fontweight='bold')
+        # ax8 = plt.subplot(3, 3, 8)
+        # if len(self.prediction_times) > 0:
+        #     ax8.plot(self.prediction_times, color='magenta', alpha=0.6, linewidth=1.5)
+        #     ax8.axhline(y=np.mean(self.prediction_times), color='green', linestyle='--',
+        #                 label=f'Mean: {np.mean(self.prediction_times):.4f}s', linewidth=2)
+        #     ax8.set_xlabel('Prediction Call')
+        #     ax8.set_ylabel('Time (seconds)')
+        #     ax8.set_title('Model Prediction Times', fontweight='bold')
+        #     ax8.legend()
+        #     ax8.grid(True, alpha=0.3)
+        # else:
+        #     ax8.text(0.5, 0.5, 'No prediction time data yet', ha='center', va='center',
+        #              fontsize=11, transform=ax8.transAxes, color='gray')
+        #     ax8.set_title('Model Prediction Times', fontweight='bold')
 
         # 9. Loss Distribution (Histogram)
-        ax9 = plt.subplot(3, 3, 9)
-        if len(self.loss) > 0:
-            ax9.hist(self.loss, bins=min(30, len(self.loss)), color='skyblue',
-                     edgecolor='black', alpha=0.7)
-            ax9.set_xlabel('Loss Value')
-            ax9.set_ylabel('Frequency')
-            ax9.set_title('Training Loss Distribution', fontweight='bold')
-            ax9.grid(True, alpha=0.3, axis='y')
-        else:
-            ax9.text(0.5, 0.5, 'No loss data yet', ha='center', va='center',
-                     fontsize=11, transform=ax9.transAxes, color='gray')
-            ax9.set_title('Training Loss Distribution', fontweight='bold')
+        # ax9 = plt.subplot(3, 3, 9)
+        # if len(self.loss) > 0:
+        #     ax9.hist(self.loss, bins=min(30, len(self.loss)), color='skyblue',
+        #              edgecolor='black', alpha=0.7)
+        #     ax9.set_xlabel('Loss Value')
+        #     ax9.set_ylabel('Frequency')
+        #     ax9.set_title('Training Loss Distribution', fontweight='bold')
+        #     ax9.grid(True, alpha=0.3, axis='y')
+        # else:
+        #     ax9.text(0.5, 0.5, 'No loss data yet', ha='center', va='center',
+        #              fontsize=11, transform=ax9.transAxes, color='gray')
+        #     ax9.set_title('Training Loss Distribution', fontweight='bold')
 
         plt.tight_layout()
 
