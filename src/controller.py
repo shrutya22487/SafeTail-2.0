@@ -84,16 +84,30 @@ class Controller:
         self.post_epsilon_steps_target = constants.post_epsilon_steps_target  # run this many steps before saving + testing
         self.testing_phase_active = constants.testing_phase_active  # flag: we are now in the testing phase
 
+        # ── BASELINE MODE ────────────────────────────────────────────────────────
+        # Change this string to match whichever run you are doing.
+        # Options: "safetail" | "minload_1" | "minload_2" | "minload_3"
+        #          | "minprop_1" | "minprop_2" | "minprop_3"
+        #          | "rand_1" | "rand_2" | "rand_3"
+        self.BASELINE_MODE = "safetail"
+        # ─────────────────────────────────────────────────────────────────────
+
         self.latency_log_path = (
-                Path(constants.training_log_folder) / "latency_log.csv"
+                Path(constants.training_log_folder) / f"{self.BASELINE_MODE}_latency_log.csv"
         ).resolve()
 
-        # Create CSV with header
+        self.latency_log_path_logs = Path("logs") / f"{self.BASELINE_MODE}_latency_log.csv"
+        self.latency_log_path_logs.parent.mkdir(parents=True, exist_ok=True)
+
+        header = (
+            "request_id,request_type,computation_delay,propagation_delay,"
+            "transmission_delay,queueing_delay,total_latency\n"
+        )
+        # Create CSV with header in both locations
         with open(self.latency_log_path, "w") as f:
-            f.write(
-                "request_id,request_type,computation_delay,propagation_delay,"
-                "transmission_delay,queueing_delay,total_latency\n"
-            )
+            f.write(header)
+        with open(self.latency_log_path_logs, "w") as f:
+            f.write(header)
 
     # ------------------------------------------------------------
     # Utility
@@ -114,17 +128,19 @@ class Controller:
         try:
             request_id = getattr(request, "request_id", "unknown")
             request_type = getattr(request, "combination", "?")
-
+            row = (
+                f"{request_id},"
+                f"{request_type},"
+                f"{computation_delay:.6f},"
+                f"{propagation_delay:.6f},"
+                f"{transmission_delay:.6f},"
+                f"{queueing_delay:.6f},"
+                f"{total_latency:.6f}\n"
+            )
             with open(self.latency_log_path, "a") as f:
-                f.write(
-                    f"{request_id},"
-                    f"{request_type},"
-                    f"{computation_delay:.6f},"
-                    f"{propagation_delay:.6f},"
-                    f"{transmission_delay:.6f},"
-                    f"{queueing_delay:.6f},"
-                    f"{total_latency:.6f}\n"
-                )
+                f.write(row)
+            with open(self.latency_log_path_logs, "a") as f:
+                f.write(row)
 
         except Exception as e:
             print(f"[CONTROLLER] ⚠️ CSV logging failed: {type(e).__name__} - {e}")
@@ -133,6 +149,28 @@ class Controller:
         now = time.time()
         load = [s.check_server_availability(now) for s in self.server_list]
         return np.array(load)
+
+    # ── Baseline server selection helpers ────────────────────────────────────
+
+    def _select_minload_servers(self, x):
+        """Return indices of the x servers with the fewest active requests."""
+        loads = [(s.num_requests, i) for i, s in enumerate(self.server_list)]
+        loads.sort(key=lambda t: t[0])
+        return [i for _, i in loads[:x]]
+
+    def _select_minprop_servers(self, x):
+        """Return indices of the x servers with the lowest propagation delay."""
+        prop_delays = [(s._get_propogation_delay(), i) for i, s in enumerate(self.server_list)]
+        prop_delays.sort(key=lambda t: t[0])
+        return [i for _, i in prop_delays[:x]]
+
+    def _select_rand_servers(self, x):
+        """Return indices of x randomly selected servers."""
+        import random
+        indices = list(range(self.num_servers))
+        return random.sample(indices, min(x, self.num_servers))
+
+    # ─────────────────────────────────────────────────────────────────────────
 
     def get_queue_lengths(self):
         """Get current queue length for each server."""
@@ -486,9 +524,31 @@ class Controller:
             print(f"[CONTROLLER, !] Failed to compute initial step reward: {type(e).__name__} - {e}")
             request.step_reward_list = np.zeros(self.num_servers, dtype=float)
 
-        # agent action
+        # ── Server selection: driven automatically by self.BASELINE_MODE ────────
         try:
-            action_subset, action_index = self.agent.get_action(request) # random.choice(servers, num_servers)
+            if self.BASELINE_MODE == "safetail":
+                action_subset, action_index = self.agent.get_action(request)
+            elif self.BASELINE_MODE == "minload_1":
+                action_subset, action_index = self._select_minload_servers(1), 0
+            elif self.BASELINE_MODE == "minload_2":
+                action_subset, action_index = self._select_minload_servers(2), 0
+            elif self.BASELINE_MODE == "minload_3":
+                action_subset, action_index = self._select_minload_servers(3), 0
+            elif self.BASELINE_MODE == "minprop_1":
+                action_subset, action_index = self._select_minprop_servers(1), 0
+            elif self.BASELINE_MODE == "minprop_2":
+                action_subset, action_index = self._select_minprop_servers(2), 0
+            elif self.BASELINE_MODE == "minprop_3":
+                action_subset, action_index = self._select_minprop_servers(3), 0
+            elif self.BASELINE_MODE == "rand_1":
+                action_subset, action_index = self._select_rand_servers(1), 0
+            elif self.BASELINE_MODE == "rand_2":
+                action_subset, action_index = self._select_rand_servers(2), 0
+            elif self.BASELINE_MODE == "rand_3":
+                action_subset, action_index = self._select_rand_servers(3), 0
+            else:
+                raise ValueError(f"Unknown BASELINE_MODE: '{self.BASELINE_MODE}'")
+        # ─────────────────────────────────────────────────────────────────────
         except Exception as e:
             print(f"[CONTROLLER, !] Agent failed to produce action: {type(e).__name__} - {e}")
             return
@@ -515,11 +575,7 @@ class Controller:
                     f"{type(e).__name__} - {e}"
                 )
                 print(1e9)
-        ######################################
-        # FILTER REUQESTS WITH MIN PROPAGATION DELAY
-        # modify l to store only the filtered requests
-        #######################################
-        # Store actual total_delay in request for each server for reward calculation and tracking
+
         request.total_processing_delay = np.array(request_total_delay)
 
         # compute reward and track latency metrics
@@ -563,45 +619,46 @@ class Controller:
         except Exception:
             pass
 
-        # store experience
-        try:
-            self.step_experiences.append({
-                "state": request,
-                "action": action_index,
-                "reward": combined_step_reward,
-                "next_state": request  # environment is partially observable anyway
-            })
-        except Exception as e:
-            print(f"[CONTROLLER, !] Failed to store experience: {type(e).__name__} - {e}")
-
-        try:
-            self.step_rewards.append(combined_step_reward)
-            self.agent.epsilon_curve = np.append(
-                self.agent.epsilon_curve, self.agent.epsilon
-            )
-        except Exception as e:
-            print(f"[CONTROLLER, !] Failed to update reward/epsilon tracking: {type(e).__name__} - {e}")
-
         self.current_step += 1
 
-        # ---- Post-epsilon-min countdown ----
-        if not self.epsilon_min_reached and self.agent.epsilon <= self.agent.epsilon_min:
-            self.epsilon_min_reached = True
-            print(
-                f"[CONTROLLER] 🏁 Epsilon has reached its minimum value "
-                f"({self.agent.epsilon_min}). "
-                f"Running {self.post_epsilon_steps_target} more steps, "
-                f"then saving model and entering testing phase."
-            )
+        if self.BASELINE_MODE == "safetail":
+            # store experience
+            try:
+                self.step_experiences.append({
+                    "state": request,
+                    "action": action_index,
+                    "reward": combined_step_reward,
+                    "next_state": request  # environment is partially observable anyway
+                })
+            except Exception as e:
+                print(f"[CONTROLLER, !] Failed to store experience: {type(e).__name__} - {e}")
 
-        if self.epsilon_min_reached and not self.testing_phase_active:
-            self.post_epsilon_steps += 1
-            print(
-                f"[CONTROLLER] 📍 Post-epsilon-min step "
-                f"{self.post_epsilon_steps}/{self.post_epsilon_steps_target}"
-            )
-            if self.post_epsilon_steps >= self.post_epsilon_steps_target:
-                self._save_and_enter_testing()
+            try:
+                self.step_rewards.append(combined_step_reward)
+                self.agent.epsilon_curve = np.append(
+                    self.agent.epsilon_curve, self.agent.epsilon
+                )
+            except Exception as e:
+                print(f"[CONTROLLER, !] Failed to update reward/epsilon tracking: {type(e).__name__} - {e}")
+
+            # ---- Post-epsilon-min countdown ----
+            if not self.epsilon_min_reached and self.agent.epsilon <= self.agent.epsilon_min:
+                self.epsilon_min_reached = True
+                print(
+                    f"[CONTROLLER] Epsilon has reached its minimum value "
+                    f"({self.agent.epsilon_min}). "
+                    f"Running {self.post_epsilon_steps_target} more steps, "
+                    f"then saving model and entering testing phase."
+                )
+
+            if self.epsilon_min_reached and not self.testing_phase_active:
+                self.post_epsilon_steps += 1
+                print(
+                    f"[CONTROLLER] Post-epsilon-min step "
+                    f"{self.post_epsilon_steps}/{self.post_epsilon_steps_target}"
+                )
+                if self.post_epsilon_steps >= self.post_epsilon_steps_target:
+                    self._save_and_enter_testing()
 
     def finalize_episode(self):
         """
@@ -623,32 +680,33 @@ class Controller:
             f"Reward={episodic_reward:.4f}"
         )
 
-        # Store all experiences from this episode with episodic reward
-        for exp in self.step_experiences:
-            self.agent.store(
-                state_request=exp['state'],
-                action=exp['action'],
-                reward=episodic_reward,  # Use episodic reward for all experiences
-                next_state_request=exp['next_state']
-            )
+        if self.BASELINE_MODE == "safetail":
+            # Store all experiences from this episode with episodic reward
+            for exp in self.step_experiences:
+                self.agent.store(
+                    state_request=exp['state'],
+                    action=exp['action'],
+                    reward=episodic_reward,  # Use episodic reward for all experiences
+                    next_state_request=exp['next_state']
+                )
 
-        # Train agent once per episode (skip during testing phase)
-        if self.testing_phase_active:
-            episodic_reward = self.compute_episodic_reward()
+            # Train agent once per episode (skip during testing phase)
+            if self.testing_phase_active:
+                episodic_reward = self.compute_episodic_reward()
 
-            self.agent.rewards = np.append(self.agent.rewards, episodic_reward)
+                self.agent.rewards = np.append(self.agent.rewards, episodic_reward)
 
-            print(f"[TEST EPISODE {self.current_episode}] Reward={episodic_reward:.3f}")
-        elif len(self.agent.memory) >= self.agent.batch_size:
-            print(f"[CONTROLLER, EPISODE {self.current_episode}] Training agent...")
-            self.agent.experience_replay(self.agent.batch_size)
-            print(f"[CONTROLLER, EPISODE {self.current_episode}] Training complete.")
-        else:
-            print(
-                f"[CONTROLLER, EPISODE {self.current_episode}] "
-                f"Not enough experiences to train "
-                f"(have {len(self.agent.memory)}, need {self.agent.batch_size})"
-            )
+                print(f"[TEST EPISODE {self.current_episode}] Reward={episodic_reward:.3f}")
+            elif len(self.agent.memory) >= self.agent.batch_size:
+                print(f"[CONTROLLER, EPISODE {self.current_episode}] Training agent...")
+                self.agent.experience_replay(self.agent.batch_size)
+                print(f"[CONTROLLER, EPISODE {self.current_episode}] Training complete.")
+            else:
+                print(
+                    f"[CONTROLLER, EPISODE {self.current_episode}] "
+                    f"Not enough experiences to train "
+                    f"(have {len(self.agent.memory)}, need {self.agent.batch_size})"
+                )
 
         # Log episode metrics
         print(f"[CONTROLLER, EPISODE {self.current_episode}] "
