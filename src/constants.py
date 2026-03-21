@@ -1,5 +1,3 @@
-%%writefile src/constants.py
-# paste the edited file contents here
 max_bandwidth = 20
 median_computation_delay = 0.05
 total_no_request = 500000
