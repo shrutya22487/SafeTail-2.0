@@ -174,8 +174,8 @@ def main():
         max_interval=constants.max_interval,
         jitter=constants.jitter,
         request_factory=request_factory,
-        host="127.0.0.1",
-        port=6000,
+        host=constants.receiver_host,
+        port=constants.receiver_port,
     )
 
     # ---------------- run sender (blocking) ----------------

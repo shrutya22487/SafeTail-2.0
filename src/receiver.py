@@ -8,6 +8,7 @@ import numpy as np
 from pathlib import Path
 from collections import deque
 from typing import Optional
+import constants
 
 OUT_DIR = Path("received_chunks")
 OUT_DIR.mkdir(exist_ok=True)
@@ -15,8 +16,8 @@ OUT_DIR.mkdir(exist_ok=True)
 class Receiver:
     def __init__(
         self,
-        host: str = "127.0.0.1",
-        port: int = 6000,
+        host: str = constants.receiver_host,
+        port: int = constants.receiver_port,
         tcp_backlog: int = 200,
         max_queue: int = 20,
         accept_window_sec: float = 0.15,

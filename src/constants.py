@@ -40,3 +40,6 @@ epsilon_min_reached = False
 post_epsilon_steps = 0
 post_epsilon_steps_target = 8000
 testing_phase_active = False
+
+receiver_host = "127.0.0.1"
+receiver_port = 6000

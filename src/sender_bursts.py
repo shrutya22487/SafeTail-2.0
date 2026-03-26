@@ -8,6 +8,7 @@ import random
 import numpy as np
 from typing import Callable, Optional
 import user
+import constants
 
 def _send_length_prefixed(conn, data_bytes: bytes):
     conn.sendall(struct.pack(">Q", len(data_bytes)) + data_bytes)
@@ -21,8 +22,8 @@ class SenderBursts:
     def __init__(
         self,
         arr: Optional[np.ndarray] = None,
-        host: str = "127.0.0.1",
-        port: int = 6000,
+        host: str = constants.receiver_host,
+        port: int = constants.receiver_port,
         total: Optional[int] = None,
         chunk_size: int = 10,
         bursts: int = 8,
