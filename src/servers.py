@@ -93,7 +93,7 @@ class Server:
             print(f" Combination: {ar['request'].combination}, Start: {start:.2f}, Finish: {finish:.2f}, Proc Time: {proc:.6f}")
 
     def _get_propogation_delay(self):
-        return random.choice(self.propagation_delays[self.server_index - 1]) / 10
+        return random.choice(self.propagation_delays[self.server_index - 1])
 
     def _get_tramission_delay(self, message_size_bytes, upload_bandwidth_kbps, download_bandwidth_kbps):
         return random.choice([18.5, 19.2, 20, 21.5, 22]) / 1000
