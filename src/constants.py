@@ -46,4 +46,7 @@ receiver_port = 6000
 
 BASELINE_MODE = "safetail" 
 # Options: 
-# "safetail" | "minload_1" | "minload_2" | "minload_3" | "minprop_1" | "minprop_2" | "minprop_3" | "rand_1" | "rand_2" | "rand_3"   
+# "safetail" 
+# | "minload_1" | "minload_2" | "minload_3" 
+# | "minprop_1" | "minprop_2" | "minprop_3" 
+# | "rand_1".   | "rand_2"    | "rand_3"   
