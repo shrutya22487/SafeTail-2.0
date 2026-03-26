@@ -41,12 +41,13 @@ post_epsilon_steps = 0
 post_epsilon_steps_target = 8000
 testing_phase_active = False
 
-receiver_host = "127.0.0.1"
-receiver_port = 6000
+import os
 
-BASELINE_MODE = "safetail" 
-# Options: 
-# "safetail" 
-# | "minload_1" | "minload_2" | "minload_3" 
-# | "minprop_1" | "minprop_2" | "minprop_3" 
-# | "rand_1".   | "rand_2"    | "rand_3"   
+receiver_host = "127.0.0.1"
+receiver_port = int(os.environ.get("RECEIVER_PORT", 6000))
+
+BASELINE_MODE = os.environ.get("BASELINE_MODE", "safetail")
+# Options: "safetail"
+# | "minload_1" | "minload_2" | "minload_3"
+# | "minprop_1" | "minprop_2" | "minprop_3"
+# | "rand_1"    | "rand_2"    | "rand_3"
