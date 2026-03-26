@@ -92,21 +92,14 @@ class Controller:
         self.BASELINE_MODE = constants.BASELINE_MODE
         # ─────────────────────────────────────────────────────────────────────
 
-        self.latency_log_path = (
-                Path(constants.training_log_folder) / f"{self.BASELINE_MODE}_latency_log.csv"
-        ).resolve()
-
-        self.latency_log_path_logs = Path("logs") / f"{self.BASELINE_MODE}_latency_log.csv"
-        self.latency_log_path_logs.parent.mkdir(parents=True, exist_ok=True)
+        self.latency_log_path = Path("logs") / f"{self.BASELINE_MODE}_latency_log.csv"
+        self.latency_log_path.parent.mkdir(parents=True, exist_ok=True)
 
         header = (
             "request_id,request_type,computation_delay,propagation_delay,"
             "transmission_delay,queueing_delay,total_latency\n"
         )
-        # Create CSV with header in both locations
         with open(self.latency_log_path, "w") as f:
-            f.write(header)
-        with open(self.latency_log_path_logs, "w") as f:
             f.write(header)
 
     # ------------------------------------------------------------
@@ -138,8 +131,6 @@ class Controller:
                 f"{total_latency:.6f}\n"
             )
             with open(self.latency_log_path, "a") as f:
-                f.write(row)
-            with open(self.latency_log_path_logs, "a") as f:
                 f.write(row)
 
         except Exception as e:

@@ -1,3 +1,5 @@
+import os
+
 max_bandwidth = 20
 median_computation_delay = 0.05
 total_no_request = 500000
@@ -16,7 +18,7 @@ max_interval = 0.8
 jitter = 0.02
 lr_decay_rate = 0.999
 lr_min = 1e-5
-training_log_folder = "training_logs_2"
+training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_logs_2")
 epochs = 1
 no_of_sensors = 1
 max_load = 5
@@ -40,8 +42,6 @@ epsilon_min_reached = False
 post_epsilon_steps = 0
 post_epsilon_steps_target = 8000
 testing_phase_active = False
-
-import os
 
 receiver_host = "127.0.0.1"
 receiver_port = int(os.environ.get("RECEIVER_PORT", 6000))
