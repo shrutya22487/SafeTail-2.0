@@ -89,7 +89,7 @@ class Controller:
         # Options: "safetail" | "minload_1" | "minload_2" | "minload_3"
         #          | "minprop_1" | "minprop_2" | "minprop_3"
         #          | "rand_1" | "rand_2" | "rand_3"
-        self.BASELINE_MODE = "safetail"
+        self.BASELINE_MODE = constants.BASELINE_MODE
         # ─────────────────────────────────────────────────────────────────────
 
         self.latency_log_path = (
