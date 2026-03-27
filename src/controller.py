@@ -573,7 +573,6 @@ class Controller:
                     f"[CONTROLLER, !] Failed to schedule request on server {i}: "
                     f"{type(e).__name__} - {e}"
                 )
-                print(1e9)
 
         request.total_processing_delay = np.array(request_total_delay)
 

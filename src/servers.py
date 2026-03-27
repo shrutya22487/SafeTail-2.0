@@ -216,7 +216,7 @@ class Server:
              computation_delay_for_node,
              propagation_delay_for_node,
              tramission_delay_for_node) = self.compute_request_time(request)
-            return False, "server full", total_delay
+            return False, "server full", total_delay, combined_str, computation_delay_for_node, propagation_delay_for_node,tramission_delay_for_node
 
         (total_delay,
          combined_str,
