@@ -1,15 +1,14 @@
+import importlib
+import pickle
 import random
+import sys
+import time
+from pathlib import Path
 from typing import Any, Union
 
-import numpy as np
-import pickle
 import pandas as pd
-import time
+
 import user
-from pathlib import Path
-import sys
-import os
-import importlib
 
 # fixed bandwidth (kbps) used for both uplink and downlink when request doesn't specify bandwidth/load
 FIXED_BANDWIDTH_KBPS = 1000.0
@@ -90,7 +89,8 @@ class Server:
             start = ar['start_time']
             finish = ar['finish_time']
             proc = ar['proc_time']
-            print(f" Combination: {ar['request'].combination}, Start: {start:.2f}, Finish: {finish:.2f}, Proc Time: {proc:.6f}")
+            print(
+                f" Combination: {ar['request'].combination}, Start: {start:.2f}, Finish: {finish:.2f}, Proc Time: {proc:.6f}")
 
     def _get_propogation_delay(self):
         return random.choice(self.propagation_delays[self.server_index - 1])
@@ -201,6 +201,7 @@ class Server:
             propagation_delay_for_node,
             tramission_delay_for_node,
         )
+
     def schedule_request(self, request: user.Request, current_time: float = None, do_sleep: bool = False):
         """
         Compute time, schedule request if capacity, return (success, finish_time_or_reason, proc_time).
@@ -211,10 +212,10 @@ class Server:
         self.update_active_requests(current_time=current_time)
         if self.num_requests >= MAX_CONCURRENT_REQUESTS:
             (total_delay,
-            combined_str,
-            computation_delay_for_node,
-            propagation_delay_for_node,
-            tramission_delay_for_node) = self.compute_request_time(request)
+             combined_str,
+             computation_delay_for_node,
+             propagation_delay_for_node,
+             tramission_delay_for_node) = self.compute_request_time(request)
             return False, "server full", total_delay
 
         (total_delay,
@@ -240,7 +241,7 @@ class Server:
             time.sleep(total_delay)
             self.update_active_requests(current_time=time.time())
 
-        return True, finish_time, total_delay, combined_str, computation_delay_for_node,propagation_delay_for_node,tramission_delay_for_node
+        return True, finish_time, total_delay, combined_str, computation_delay_for_node, propagation_delay_for_node, tramission_delay_for_node
 
     # ---------- Remaining helpers ----------
     def update_active_requests(self, current_time: float = None):
@@ -265,8 +266,8 @@ class Server:
         if current_time is None:
             current_time = time.time()
         self.update_active_requests(current_time=current_time)
-        
-        if(self.num_requests < MAX_CONCURRENT_REQUESTS):
+
+        if (self.num_requests < MAX_CONCURRENT_REQUESTS):
             return self.num_requests
         else:
             return -1

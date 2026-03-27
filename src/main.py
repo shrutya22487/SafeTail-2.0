@@ -6,19 +6,23 @@ Run Receiver in background and SenderBursts in foreground.
 This request_factory constructs user.Request objects using the correct signature.
 """
 
+import inspect
+import logging
+import random
 import time
+import warnings
+from pathlib import Path
 from types import SimpleNamespace
-from receiver import Receiver
-from sender_bursts import SenderBursts
+
+import numpy as np
+import pandas as pd
+
+import constants
 import user
 from controller import Controller
-import constants
-import random
-import pandas as pd
-from pathlib import Path
-import numpy as np
-import logging
-import warnings
+from receiver import Receiver
+from sender_bursts import SenderBursts
+
 warnings.filterwarnings("ignore")
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -34,7 +38,7 @@ SERVER_CSVS = [
     DATA_DIR / "server4.csv",
     DATA_DIR / "server5.csv",
 ]
-import inspect
+
 
 def print_constants(module):
     print("\n" + "=" * 50)
@@ -46,6 +50,7 @@ def print_constants(module):
             print(f"  {name:<30} = {value}")
     print("=" * 50 + "\n")
 
+
 print_constants(constants)
 
 SERVER_DFS = []
@@ -53,6 +58,7 @@ for p in SERVER_CSVS:
     if not p.exists():
         raise FileNotFoundError(f"Missing CSV: {p}")
     SERVER_DFS.append(pd.read_csv(p))
+
 
 # --- request factory that uses the actual Request signature ---
 def request_factory(i: int):
@@ -76,21 +82,21 @@ def request_factory(i: int):
     # -------- safest defaults --------
     server_count = 5
     # added the deadlines these are in milli- second ms
-    
+
     deadlines = np.asarray([
-        [100,400],
-        [30,200]
+        [100, 400],
+        [30, 200]
     ])
 
     try:
         # ---------------- combination ----------------
         try:
             combination = random.choice(["s", "p", "d"])
-            if(combination == "s"):
-                deadline  = deadlines[0]
+            if (combination == "s"):
+                deadline = deadlines[0]
             else:
                 deadline = deadlines[1]
-        
+
         except Exception:
             # absolute fallback
             combination = "s"
@@ -104,7 +110,7 @@ def request_factory(i: int):
             message_size=1024,
             bandwidth=20,
             load=np.zeros(server_count, dtype=int),
-            deadline = deadline
+            deadline=deadline
         )
 
         return req
@@ -133,7 +139,7 @@ def request_factory(i: int):
                 message_size=np.zeros(server_count, dtype=float),
                 bandwidth=np.zeros(server_count, dtype=float),
                 load=np.zeros(server_count, dtype=int),
-                deadline = deadlines[0]
+                deadline=deadlines[0]
             )
         except Exception:
             # ==================================================
@@ -145,7 +151,7 @@ def request_factory(i: int):
                     process_id=int(i),
                     combination="s",
                     arrival_time=time.time() * 1000.0,
-                    deadline = deadlines[0]
+                    deadline=deadlines[0]
                 )
             except Exception:
                 # ==================================================
@@ -153,20 +159,20 @@ def request_factory(i: int):
                 # ==================================================
                 return None
 
+
 def main():
     # --------------- setup controller ---------------
-    controller = Controller(num_servers=constants.beta)  #Change number of servers accordingly
+    controller = Controller(num_servers=constants.beta)  # Change number of servers accordingly
     # ---------------- setup receiver ----------------
     receiver = Receiver(persist_chunks=True, process_time_per_chunk=0.2, controller=controller)
-    
-    controller.run()
 
+    controller.run()
 
     # ---------------- create sender ----------------
     sender = SenderBursts(
         arr=None,
-        sample_count=constants.total_no_request,        # total requests
-        chunk_size=constants.chunk_size,          # requests per chunk
+        sample_count=constants.total_no_request,  # total requests
+        chunk_size=constants.chunk_size,  # requests per chunk
         bursts=constants.no_of_burst,
         min_burst=constants.min_burst,
         max_burst=constants.max_burst,
@@ -189,7 +195,7 @@ def main():
         print("[MAIN] Waiting for training to finish...")
 
         try:
-            controller.training_done.wait()   # BLOCKS safely
+            controller.training_done.wait()  # BLOCKS safely
         except KeyboardInterrupt:
             print("\n[MAIN] Ctrl+C received early.")
         finally:

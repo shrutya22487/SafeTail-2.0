@@ -1,13 +1,13 @@
-#!/usr/bin/env python3
 import threading
 import time
-import numpy as np
-import pandas as pd
-from collections import deque
 from pathlib import Path
 
-import servers
+import numpy as np
+import pandas as pd
+from tensorflow.keras.models import load_model
+
 import constants
+import servers
 from agent import DQNAgent
 
 
@@ -56,6 +56,7 @@ class Controller:
         self.plot_dir.mkdir(parents=True, exist_ok=True)
 
         # ---------------- Agent ----------------
+
         self.agent = DQNAgent(
             states=constants.nS,
             actions=constants.nA,
@@ -73,6 +74,11 @@ class Controller:
             server_list=self.server_list,
             request=None
         )
+
+        if constants.testing_phase_active:
+            self.agent.model = load_model(constants.saved_model_path)
+            self.agent.epsilon = 0.0
+            self.agent.memory.clear()
 
         # ---------------- Tracking for plots ----------------
         self.episode_latencies = []  # Track latencies per episode
@@ -479,9 +485,9 @@ class Controller:
                 request_total_delay.append(delay)
                 combined_strs.append(combined_str)
                 other_latencies.append({
-                    'computation' : comp,
-                    'propagation' : prop,
-                    "transmission" : trans
+                    'computation': comp,
+                    'propagation': prop,
+                    "transmission": trans
                 })
             except Exception as e:
                 print(
@@ -555,10 +561,12 @@ class Controller:
         # assign request
         for i in action_subset:
             try:
-                _, finish_time, processing_time, combined_str, computation_delay_for_node, propagation_delay_for_node, tramission_delay_for_node = self.server_list[i].schedule_request(request)
+                _, finish_time, processing_time, combined_str, computation_delay_for_node, propagation_delay_for_node, tramission_delay_for_node = \
+                    self.server_list[i].schedule_request(request)
                 # Update observed processing time for this server (in ms)
                 request_total_delay[i] = float(processing_time) * 1000.0
-                l.append([request_total_delay[i], combined_str, computation_delay_for_node, propagation_delay_for_node, tramission_delay_for_node])
+                l.append([request_total_delay[i], combined_str, computation_delay_for_node, propagation_delay_for_node,
+                          tramission_delay_for_node])
 
             except Exception as e:
                 print(
@@ -809,7 +817,6 @@ class Controller:
         print("\n" + "=" * 60)
         print("[CONTROLLER] 🧪 ENTERING TESTING PHASE (3000 requests)")
         print("=" * 60 + "\n")
-
 
     def run_testing_phase(self, request):
         # if self.testing_request_count >= self.testing_request_limit:
