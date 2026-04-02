@@ -100,13 +100,25 @@ class Controller:
 
         self.latency_log_path = Path("logs") / f"{self.BASELINE_MODE}_latency_log.csv"
         self.latency_log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.request_access_log_path = Path("logs") / f"{self.BASELINE_MODE}_request_access_log.csv"
+        self.request_access_log_path.parent.mkdir(parents=True, exist_ok=True)
 
+        with open(self.request_access_log_path, "w") as f:
+            f.write("request_id,request_type,access_rate\n")
         header = (
             "request_id,request_type,computation_delay,propagation_delay,"
             "transmission_delay,queueing_delay,total_latency\n"
         )
         with open(self.latency_log_path, "w") as f:
             f.write(header)
+
+    def log_request_access_rate_with_type(self, request_id, request_type, access_rate):
+        try:
+            row = f"{request_id},{request_type},{access_rate:.6f}\n"
+            with open(self.request_access_log_path, "a") as f:
+                f.write(row)
+        except Exception as e:
+            print(f"[CONTROLLER] Failed to log request access rate: {e}")
 
     # ------------------------------------------------------------
     # Utility
@@ -524,7 +536,19 @@ class Controller:
         # ── Server selection: driven automatically by self.BASELINE_MODE ────────
         try:
             if self.BASELINE_MODE == "safetail":
+                original_request_type = request.combination
                 action_subset, action_index = self.agent.get_action(request)
+                # -------- ACCESS RATE PER REQUEST --------
+                try:
+                    access_rate = len(action_subset) / self.num_servers
+                    self.log_request_access_rate_with_type(
+                        request_id=request.request_id,
+                        request_type=original_request_type,
+                        access_rate=access_rate
+                    )
+                except Exception as e:
+                    print(f"[CONTROLLER] Access rate logging failed: {e}")
+
             elif self.BASELINE_MODE == "minload_1":
                 action_subset, action_index = self._select_minload_servers(1), 0
             elif self.BASELINE_MODE == "minload_2":
