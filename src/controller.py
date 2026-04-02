@@ -420,11 +420,11 @@ class Controller:
         # sum of (Percentage of s done) * D1 + (Percentage of d done) * D1 + (Percentage of p done) * D1
         wait_time_denominator = 0.0
         if self.request_s_total > 0:
-            wait_time_denominator += (self.request_s_done / self.request_s_total) * 100
+            wait_time_denominator += (self.request_s_done / self.request_s_total) * self.deadlines[0][0]
         if self.request_d_total > 0:
-            wait_time_denominator += (self.request_d_done / self.request_d_total) * 30
+            wait_time_denominator += (self.request_d_done / self.request_d_total) * self.deadlines[1][0]
         if self.request_p_total > 0:
-            wait_time_denominator += (self.request_p_done / self.request_p_total) * 30
+            wait_time_denominator += (self.request_p_done / self.request_p_total) * self.deadlines[1][0]
 
         #################################################################################
 
