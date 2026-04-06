@@ -97,11 +97,22 @@ class Controller:
         #          | "rand_1" | "rand_2" | "rand_3"
         self.BASELINE_MODE = constants.BASELINE_MODE
         # ─────────────────────────────────────────────────────────────────────
+        base_log_dir = Path(constants.training_log_folder)
+        base_log_dir.mkdir(parents=True, exist_ok=True)
 
-        self.latency_log_path = Path("logs") / f"{self.BASELINE_MODE}_latency_log.csv"
+        self.latency_log_path = base_log_dir / f"{self.BASELINE_MODE}_latency_log.csv"
+        self.request_access_log_path = base_log_dir / f"{self.BASELINE_MODE}_request_access_log.csv"
         self.latency_log_path.parent.mkdir(parents=True, exist_ok=True)
-        self.request_access_log_path = Path("logs") / f"{self.BASELINE_MODE}_request_access_log.csv"
         self.request_access_log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.step_reward_log_path = base_log_dir / "step_rewards.csv"
+
+        self.episode_reward_log_path = base_log_dir / "episode_rewards.csv"
+
+        with open(self.episode_reward_log_path, "w") as f:
+            f.write("episode,episodic_reward\n")
+
+        with open(self.step_reward_log_path, "w") as f:
+            f.write("episode,step,reward\n")
 
         with open(self.request_access_log_path, "w") as f:
             f.write("request_id,request_type,access_rate\n")
@@ -642,7 +653,11 @@ class Controller:
             pass
 
         self.current_step += 1
-
+        try:
+            with open(self.step_reward_log_path, "a") as f:
+                f.write(f"{self.current_episode},{self.current_step},{combined_step_reward:.6f}\n")
+        except Exception as e:
+            print(f"[CONTROLLER] Failed to log step reward: {e}")
         if self.BASELINE_MODE == "safetail":
             # store experience
             try:
@@ -695,7 +710,11 @@ class Controller:
 
         # Compute episodic reward
         episodic_reward = self.compute_episodic_reward()
-
+        try:
+            with open(self.episode_reward_log_path, "a") as f:
+                f.write(f"{self.current_episode},{episodic_reward:.6f}\n")
+        except Exception as e:
+            print(f"[CONTROLLER] Failed to log episodic reward: {e}")
         print(
             f"[EPISODE {self.current_episode}] "
             f"Steps={len(self.step_rewards)}, "
