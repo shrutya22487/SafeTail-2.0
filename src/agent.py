@@ -146,7 +146,7 @@ class DQNAgent:
         self.episode_access_rate = np.array([])
         self.latencies = np.array([])
         self.deviations = np.array([])
-        self.rewards = np.array([])
+        self.episodic_reward_history = np.array([])
         self.action = np.array([], dtype=object)
         self.load_arr = np.array([])
         self.request = request
@@ -356,7 +356,6 @@ class DQNAgent:
 
         self.loss = np.append(self.loss, hist.history['loss'][0])
         self.val_loss = np.append(self.val_loss, hist.history['val_loss'][0])
-        self.rewards = np.append(self.rewards, np.mean(rewards))
 
     def get_min_delay(self, request, servers_to_be_queried):
         """
@@ -492,8 +491,8 @@ class DQNAgent:
         # 4. Rewards over Time
         ax4 = plt.subplot(3, 3, 4)
 
-        if len(self.rewards) > 0:
-            ax4.plot(self.rewards, color='purple', alpha=0.7, linewidth=1.5)
+        if len(self.episodic_reward_history) > 0:
+            ax4.plot(self.episodic_reward_history, color='purple', alpha=0.7, linewidth=1.5)
 
             if hasattr(self, "testing_start_reward_index"):
                 ax4.axvline(
@@ -664,12 +663,12 @@ class DQNAgent:
         #         f.write(f"  Final: {self.val_loss[-1]:.6f}\n\n")
         #
         #     # Rewards
-        #     if len(self.rewards) > 0:
+        #     if len(self.episodic_reward_history) > 0:
         #         f.write("REWARDS:\n")
-        #         f.write(f"  Mean: {np.mean(self.rewards):.6f}\n")
-        #         f.write(f"  Std:  {np.std(self.rewards):.6f}\n")
-        #         f.write(f"  Min:  {np.min(self.rewards):.6f}\n")
-        #         f.write(f"  Max:  {np.max(self.rewards):.6f}\n\n")
+        #         f.write(f"  Mean: {np.mean(self.episodic_reward_history):.6f}\n")
+        #         f.write(f"  Std:  {np.std(self.episodic_reward_history):.6f}\n")
+        #         f.write(f"  Min:  {np.min(self.episodic_reward_history):.6f}\n")
+        #         f.write(f"  Max:  {np.max(self.episodic_reward_history):.6f}\n\n")
         #
         #     # Latencies
         #     if len(self.latencies) > 0:

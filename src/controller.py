@@ -126,9 +126,9 @@ class Controller:
             self.load_existing_plot_history()
 
             # boundary marker for plots
-            self.agent.testing_start_index = len(self.agent.rewards) 
+            self.agent.testing_start_index = len(self.agent.episodic_reward_history) 
 
-        print("rewards:", len(self.agent.rewards))
+        print("rewards:", len(self.agent.episodic_reward_history))
         print("loss:", len(self.agent.loss))
         print("lat:", len(self.agent.latencies))
         print("access:", len(self.agent.episode_access_rate))
@@ -199,7 +199,7 @@ class Controller:
         # ---------------- Rewards ----------------
         if reward_csv.exists():
             df = pd.read_csv(reward_csv)
-            self.agent.rewards = df["episodic_reward"].dropna().values
+            self.agent.episodic_reward_history = df["episodic_reward"].dropna().values
 
         # ---------------- Access -----------------
         if access_csv.exists():
@@ -219,7 +219,7 @@ class Controller:
         # Since old history = training history,
         # testing starts AFTER loaded data
         # =====================================================
-        self.agent.testing_start_reward_index = len(self.agent.rewards)
+        self.agent.testing_start_reward_index = len(self.agent.episodic_reward_history)
         self.agent.testing_start_latency_index = len(self.agent.latencies)
         self.agent.testing_start_access_index = len(self.agent.episode_access_rate)
         self.agent.testing_start_epsilon_index = len(self.agent.epsilon_curve)
@@ -227,7 +227,7 @@ class Controller:
         self.agent.testing_start_deviation_index = len(self.agent.deviations)
 
         print("[CONTROLLER] Loaded plot history:")
-        print("Rewards :", len(self.agent.rewards))
+        print("Rewards :", len(self.agent.episodic_reward_history))
         print("Latency :", len(self.agent.latencies))
         print("Access  :", len(self.agent.episode_access_rate))
     def find_free_servers(self):
@@ -789,10 +789,11 @@ class Controller:
 
         if self.BASELINE_MODE == "safetail":
 
-            if self.testing_phase_active:
-                # continue reward plots during testing
-                self.agent.rewards = np.append(self.agent.rewards, episodic_reward)
+            # Always track episodic reward (same quantity in both training and testing,
+            # and matches what is written to episode_rewards.csv / loaded from it)
+            self.agent.episodic_reward_history = np.append(self.agent.episodic_reward_history, episodic_reward)
 
+            if self.testing_phase_active:
                 print(
                     f"[TEST EPISODE {self.current_episode}] "
                     f"Reward={episodic_reward:.3f}"
@@ -912,7 +913,7 @@ class Controller:
         # =====================================================
         # IMPORTANT: Separate indices for each metric
         # =====================================================
-        self.agent.testing_start_reward_index = len(self.agent.rewards)
+        self.agent.testing_start_reward_index = len(self.agent.episodic_reward_history)
         self.agent.testing_start_latency_index = len(self.agent.latencies)
         self.agent.testing_start_access_index = len(self.agent.episode_access_rate)
         self.agent.testing_start_epsilon_index = len(self.agent.epsilon_curve)
@@ -1019,7 +1020,7 @@ class Controller:
         #         len(self.agent.loss),
         #         len(self.agent.val_loss),
         #         len(self.agent.epsilon_curve),
-        #         len(self.agent.rewards),
+        #         len(self.agent.episodic_reward_history),
         #         len(self.agent.latencies),
         #         len(self.agent.deviations),
         #         len(self.agent.episode_access_rate),
@@ -1042,7 +1043,7 @@ class Controller:
         #         "loss": pad_to_length(self.agent.loss, max_len),
         #         "val_loss": pad_to_length(self.agent.val_loss, max_len),
         #         "epsilon": pad_to_length(self.agent.epsilon_curve, max_len),
-        #         "reward": pad_to_length(self.agent.rewards, max_len),
+        #         "reward": pad_to_length(self.agent.episodic_reward_history, max_len),
         #         "latency": pad_to_length(self.agent.latencies, max_len),
         #         "deviation": pad_to_length(self.agent.deviations, max_len),
         #         "access_rate": pad_to_length(self.agent.episode_access_rate, max_len),
@@ -1073,7 +1074,7 @@ class Controller:
         metrics_path = save_dir / f"metrics_ep{self.current_episode}_{timestamp}.csv"
         pd.DataFrame({
             "epsilon": self.agent.epsilon_curve,
-            "reward": self.agent.rewards,
+            "reward": self.agent.episodic_reward_history,
             "loss": self.agent.loss,
             "val_loss": self.agent.val_loss,
             "latency": self.agent.latencies,
