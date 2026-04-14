@@ -132,7 +132,8 @@ class Controller:
         print("loss:", len(self.agent.loss))
         print("lat:", len(self.agent.latencies))
         print("access:", len(self.agent.episode_access_rate))
-        print("testing_start:", self.agent.testing_start_index)
+        if self.testing_phase_active:
+            print("testing_start:", self.agent.testing_start_index)
 
     def log_request_access_rate_with_type(self, request_id, request_type, access_rate):
         try:
