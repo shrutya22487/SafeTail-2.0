@@ -194,8 +194,8 @@ class Controller:
         base_dir = Path(constants.original_training_log_folder)
 
         reward_csv = base_dir / "episode_rewards.csv"
-        access_csv = base_dir / "safetail_request_access_log.csv"
-        latency_csv = base_dir / f"safetail_latency_log.csv"
+        access_csv = base_dir / f"{constants.BASELINE_MODE}_request_access_log.csv"
+        latency_csv = base_dir / f"{constants.BASELINE_MODE}_latency_log.csv"
 
         # ---------------- Rewards ----------------
         if reward_csv.exists():
@@ -873,7 +873,6 @@ class Controller:
         # Reset episode-level tracking
         self.step_experiences = []
         self.step_rewards = []
-        self.episode_waiting_times = []
         self.episode_latencies = []  # Clear latency tracking
         self.episode_deviations = []  # Clear deviation tracking
         self.current_chunk = 0

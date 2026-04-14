@@ -33,16 +33,6 @@ discount_rate = 0.9
 batch_size = 128
 nS = 1 * beta + 1  # Number of state features per step.
 nA = 2 ** beta - 1  # Number of possible actions (subsets of servers).
-exploit_or_explore = []
-epsilon_curve = []
-episode_access_rate = []
-avg_waiting_time = []
-latencies = []
-deviations = []
-rewards = []
-action = []
-load_arr = []
-
 epsilon_min_reached = False
 post_epsilon_steps = 0
 post_epsilon_steps_target = 8000
@@ -75,10 +65,10 @@ BASELINE_MODE = os.environ.get("BASELINE_MODE", "safetail")
 # If the reward is consistently declining after a warm-up period,
 # it kills the process and restarts from scratch.
 # ── Watchdog Constants ──────────────────────────────────────────────────────────────────
-watchdog_min_episodes_before_check = 30   # warm-up: don't restart during early exploration
-watchdog_window = 15                      # compute slope over last N episodes
-watchdog_slope_threshold = -0.005         # slope worse than this = one bad check
-watchdog_consecutive_bad_checks = 10      # bad checks needed before restarting
+watchdog_min_episodes_before_check = 50   # warm-up: don't restart during early exploration
+watchdog_window = 50                      # compute slope over last N episodes
+watchdog_slope_threshold = -0.001         # slope worse than this = one bad check
+watchdog_consecutive_bad_checks = 5       # bad checks needed before restarting
 watchdog_check_interval_sec = 30          # seconds between checks
 watchdog_max_restarts = 10                # give up after this many restarts
 # ─────────────────────────────────────────────────────────────────────────────
