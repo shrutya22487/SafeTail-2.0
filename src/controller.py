@@ -27,7 +27,7 @@ class Controller:
         self.receiver_queue = None  # attached externally
 
         # Values for D1 and D2 based on the combination type of the request (e.g., "s" or "d" or "p").
-        self.deadlines = np.asarray([[150, 600], [45, 300]]) # in ms
+        self.deadlines = np.asarray(constants.deadlines)  # in ms
 
         # ---------------- Episode / Step tracking ----------------
         self.chunks_per_episode = chunks_per_episode
