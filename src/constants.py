@@ -74,3 +74,17 @@ BASELINE_MODE = os.environ.get("BASELINE_MODE", "safetail")
 # | "minprop_1" | "minprop_2" | "minprop_3"
 # | "rand_1"    | "rand_2"    | "rand_3"
 
+
+
+# run : python watchdog.py
+# to automate the monitoring the episodic reward curve.
+# If the reward is consistently declining after a warm-up period,
+# it kills the process and restarts from scratch.
+# ── Watchdog Constants ──────────────────────────────────────────────────────────────────
+watchdog_min_episodes_before_check = 30   # warm-up: don't restart during early exploration
+watchdog_window = 15                      # compute slope over last N episodes
+watchdog_slope_threshold = -0.005         # slope worse than this = one bad check
+watchdog_consecutive_bad_checks = 10      # bad checks needed before restarting
+watchdog_check_interval_sec = 30          # seconds between checks
+watchdog_max_restarts = 10                # give up after this many restarts
+# ─────────────────────────────────────────────────────────────────────────────
