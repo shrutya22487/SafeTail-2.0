@@ -19,7 +19,7 @@ jitter = 0.02
 lr_decay_rate = 0.999
 lr_min = 1e-5
 
-training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_logs_1_testing")
+training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_logs_6_150perc_deadline")
 
 # references the logs where the logs were stored when first run was performed, WHILE TESTING PHASE IS RUNNING...
 original_training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_logs_1")
@@ -51,7 +51,7 @@ post_epsilon_steps_target = 8000
 # "s" (speech) type:      D1=100ms (soft), D2=400ms (hard)
 # "d"/"p" type:           D1=30ms  (soft), D2=200ms (hard)
 
-DEADLINE_SCALE = 1 #change accordingly to make dealines 80% or 150% of original
+DEADLINE_SCALE = 1.5 #change accordingly to make dealines 80% or 150% of original
 
 ORIGINAL_DEADLINES = [[[100, 400], [30, 200]]]
 deadlines = [
@@ -60,7 +60,7 @@ deadlines = [
 ]
 
 # true when need to run testing phase
-testing_phase_active = True
+testing_phase_active = False
 
 # which model to use while testing
 saved_model_path = "./training_logs_1/post_epsilon_min_save/model_post_eps_min_20260408_171819.keras"
@@ -88,8 +88,8 @@ watchdog_max_restarts = 10                # give up after this many restarts
 
 # WHEN RUNNING ON SERVER JUST RUN: python run.py
 # log file names can be changed from here:
-log_file_prefix = "log"                   # log files: log_1.txt, log_2.txt, ...
-use_watchdog    = False                   # True  → run watchdog.py (auto-restarts on declining reward)
+log_file_prefix = "log_6_150perc_deadline"                   # log files: log_1.txt, log_2.txt, ...
+use_watchdog    = True                   # True  → run watchdog.py (auto-restarts on declining reward)
                                           # False → run main.py directly
 # python stop.py           # kills the most recently started run
 # python stop.py log_2.txt # kills a specific run 

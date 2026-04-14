@@ -249,7 +249,25 @@ class Receiver:
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind((self.host, self.port))
+
+            max_retries = 10
+            retry_delay = 5  # seconds
+            for attempt in range(max_retries):
+                try:
+                    s.bind((self.host, self.port))
+                    break
+                except OSError as e:
+                    import errno
+                    if e.errno == errno.EADDRINUSE:
+                        if attempt < max_retries - 1:
+                            print(f"[RECEIVER] Port {self.port} in use, retrying in {retry_delay}s... ({attempt + 1}/{max_retries})")
+                            time.sleep(retry_delay)
+                        else:
+                            print(f"[RECEIVER] Port {self.port} still in use after {max_retries} attempts. Giving up.")
+                            raise
+                    else:
+                        raise
+
             s.listen(self.tcp_backlog)
             s.settimeout(0.5)
 
