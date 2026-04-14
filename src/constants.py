@@ -53,11 +53,8 @@ post_epsilon_steps_target = 8000
 
 DEADLINE_SCALE = 1.5 #change accordingly to make dealines 80% or 150% of original
 
-ORIGINAL_DEADLINES = [[[100, 400], [30, 200]]]
-deadlines = [
-    [[value * DEADLINE_SCALE for value in pair] for pair in group]
-    for group in ORIGINAL_DEADLINES
-]
+ORIGINAL_DEADLINES = [[100, 400], [30, 200]]
+deadlines = [[value * DEADLINE_SCALE for value in pair] for pair in ORIGINAL_DEADLINES]
 
 # true when need to run testing phase
 testing_phase_active = False
