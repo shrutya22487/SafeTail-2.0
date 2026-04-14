@@ -27,7 +27,7 @@ class Controller:
         self.receiver_queue = None  # attached externally
 
         # Values for D1 and D2 based on the combination type of the request (e.g., "s" or "d" or "p").
-        self.deadlines = np.asarray([[100, 400], [30, 200]])  # in ms
+        self.deadlines = np.asarray([[150, 600], [45, 300]]) # in ms
 
         # ---------------- Episode / Step tracking ----------------
         self.chunks_per_episode = chunks_per_episode
@@ -77,8 +77,8 @@ class Controller:
 
         if constants.testing_phase_active:
             self.agent.model = load_model(constants.saved_model_path)
+            print("model loaded")
             self.agent.epsilon = 0.0
-            self.agent.memory.clear()
 
         # ---------------- Tracking for plots ----------------
         self.episode_latencies = []  # Track latencies per episode
@@ -122,6 +122,17 @@ class Controller:
         )
         with open(self.latency_log_path, "w") as f:
             f.write(header)
+        if self.testing_phase_active:
+            self.load_existing_plot_history()
+
+            # boundary marker for plots
+            self.agent.testing_start_index = len(self.agent.rewards) 
+
+        print("rewards:", len(self.agent.rewards))
+        print("loss:", len(self.agent.loss))
+        print("lat:", len(self.agent.latencies))
+        print("access:", len(self.agent.episode_access_rate))
+        print("testing_start:", self.agent.testing_start_index)
 
     def log_request_access_rate_with_type(self, request_id, request_type, access_rate):
         try:
@@ -165,6 +176,60 @@ class Controller:
         except Exception as e:
             print(f"[CONTROLLER] ⚠️ CSV logging failed: {type(e).__name__} - {e}")
 
+    def _safe_read_csv(self, path):
+        try:
+            p = Path(path)
+            if p.exists() and p.stat().st_size > 0:
+                return pd.read_csv(p)
+        except Exception as e:
+            print(f"[CONTROLLER] Failed reading {path}: {e}")
+        return pd.DataFrame()
+
+    def load_existing_plot_history(self):
+        """
+        Load previous logs and set testing-start indices correctly.
+        """
+
+        base_dir = Path(constants.original_training_log_folder)
+
+        reward_csv = base_dir / "episode_rewards.csv"
+        access_csv = base_dir / "safetail_request_access_log.csv"
+        latency_csv = base_dir / f"safetail_latency_log.csv"
+
+        # ---------------- Rewards ----------------
+        if reward_csv.exists():
+            df = pd.read_csv(reward_csv)
+            self.agent.rewards = df["episodic_reward"].dropna().values
+
+        # ---------------- Access -----------------
+        if access_csv.exists():
+            df = pd.read_csv(access_csv)
+            self.agent.episode_access_rate = df["access_rate"].dropna().values
+
+        # ---------------- Latency ----------------
+        if latency_csv.exists():
+            df = pd.read_csv(latency_csv)
+            self.agent.latencies = df["total_latency"].dropna().values
+            self.agent.deviations = abs(
+                self.agent.latencies - constants.median_computation_delay * 1000
+            )
+
+        # =====================================================
+        # IMPORTANT:
+        # Since old history = training history,
+        # testing starts AFTER loaded data
+        # =====================================================
+        self.agent.testing_start_reward_index = len(self.agent.rewards)
+        self.agent.testing_start_latency_index = len(self.agent.latencies)
+        self.agent.testing_start_access_index = len(self.agent.episode_access_rate)
+        self.agent.testing_start_epsilon_index = len(self.agent.epsilon_curve)
+        self.agent.testing_start_loss_index = len(self.agent.loss)
+        self.agent.testing_start_deviation_index = len(self.agent.deviations)
+
+        print("[CONTROLLER] Loaded plot history:")
+        print("Rewards :", len(self.agent.rewards))
+        print("Latency :", len(self.agent.latencies))
+        print("Access  :", len(self.agent.episode_access_rate))
     def find_free_servers(self):
         now = time.time()
         load = [s.check_server_availability(now) for s in self.server_list]
@@ -661,12 +726,13 @@ class Controller:
         if self.BASELINE_MODE == "safetail":
             # store experience
             try:
-                self.step_experiences.append({
-                    "state": request,
-                    "action": action_index,
-                    "reward": combined_step_reward,
-                    "next_state": request  # environment is partially observable anyway
-                })
+                if not self.testing_phase_active:
+                    self.step_experiences.append({
+                        "state": request,
+                        "action": action_index,
+                        "reward": combined_step_reward,
+                        "next_state": request
+                    })
             except Exception as e:
                 print(f"[CONTROLLER, !] Failed to store experience: {type(e).__name__} - {e}")
 
@@ -722,32 +788,36 @@ class Controller:
         )
 
         if self.BASELINE_MODE == "safetail":
-            # Store all experiences from this episode with episodic reward
-            for exp in self.step_experiences:
-                self.agent.store(
-                    state_request=exp['state'],
-                    action=exp['action'],
-                    reward=episodic_reward,  # Use episodic reward for all experiences
-                    next_state_request=exp['next_state']
-                )
 
-            # Train agent once per episode (skip during testing phase)
             if self.testing_phase_active:
-                episodic_reward = self.compute_episodic_reward()
-
+                # continue reward plots during testing
                 self.agent.rewards = np.append(self.agent.rewards, episodic_reward)
 
-                print(f"[TEST EPISODE {self.current_episode}] Reward={episodic_reward:.3f}")
-            elif len(self.agent.memory) >= self.agent.batch_size:
-                print(f"[CONTROLLER, EPISODE {self.current_episode}] Training agent...")
-                self.agent.experience_replay(self.agent.batch_size)
-                print(f"[CONTROLLER, EPISODE {self.current_episode}] Training complete.")
-            else:
                 print(
-                    f"[CONTROLLER, EPISODE {self.current_episode}] "
-                    f"Not enough experiences to train "
-                    f"(have {len(self.agent.memory)}, need {self.agent.batch_size})"
+                    f"[TEST EPISODE {self.current_episode}] "
+                    f"Reward={episodic_reward:.3f}"
                 )
+
+            else:
+                # normal training memory store
+                for exp in self.step_experiences:
+                    self.agent.store(
+                        state_request=exp['state'],
+                        action=exp['action'],
+                        reward=episodic_reward,
+                        next_state_request=exp['next_state']
+                    )
+
+                if len(self.agent.memory) >= self.agent.batch_size:
+                    print(f"[CONTROLLER, EPISODE {self.current_episode}] Training agent...")
+                    self.agent.experience_replay(self.agent.batch_size)
+                    print(f"[CONTROLLER, EPISODE {self.current_episode}] Training complete.")
+                else:
+                    print(
+                        f"[CONTROLLER, EPISODE {self.current_episode}] "
+                        f"Not enough experiences to train "
+                        f"(have {len(self.agent.memory)}, need {self.agent.batch_size})"
+                    )
 
         # Log episode metrics
         print(f"[CONTROLLER, EPISODE {self.current_episode}] "
@@ -825,108 +895,44 @@ class Controller:
 
     def _save_and_enter_testing(self):
         """
-        Called once after post-epsilon steps:
-        1. Save trained model
-        2. Switch to testing mode
+        Save trained model and switch to testing phase.
+        Also store separate testing-start indices for each metric.
         """
 
-        print("\n" + "=" * 60)
-        print("[CONTROLLER] 💾 Post-epsilon-min steps complete. Saving model...")
-        print("=" * 60)
+        print("[CONTROLLER] Saving model and entering testing phase...")
 
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
         save_dir = Path(constants.training_log_folder) / "post_epsilon_min_save"
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        model_path = save_dir / f"model_post_eps_min_{timestamp}.keras"
+        model_path = save_dir / f"model_post_eps_min_{time.strftime('%Y%m%d_%H%M%S')}.keras"
+        self.agent.model.save(model_path)
 
-        try:
-            self.agent.model.save(model_path)
-            print(f"[CONTROLLER] ✅ Model saved to {model_path}")
-        except Exception as e:
-            print(f"[CONTROLLER] ⚠️ Failed to save model: {type(e).__name__} - {e}")
+        print(f"[CONTROLLER] Model saved -> {model_path}")
 
-        self.testing_phase_active = False
+        # =====================================================
+        # IMPORTANT: Separate indices for each metric
+        # =====================================================
+        self.agent.testing_start_reward_index = len(self.agent.rewards)
+        self.agent.testing_start_latency_index = len(self.agent.latencies)
+        self.agent.testing_start_access_index = len(self.agent.episode_access_rate)
+        self.agent.testing_start_epsilon_index = len(self.agent.epsilon_curve)
+        self.agent.testing_start_loss_index = len(self.agent.loss)
+        self.agent.testing_start_deviation_index = len(self.agent.deviations)
 
+        print("[CONTROLLER] Testing indices stored:")
+        print("Reward   :", self.agent.testing_start_reward_index)
+        print("Latency  :", self.agent.testing_start_latency_index)
+        print("Access   :", self.agent.testing_start_access_index)
+        print("Epsilon  :", self.agent.testing_start_epsilon_index)
+        print("Loss     :", self.agent.testing_start_loss_index)
+        print("Deviation:", self.agent.testing_start_deviation_index)
+
+        # testing mode
+        self.testing_phase_active = True
         self.agent.epsilon = 0.0
+        self.agent.memory.clear()
 
-        # mark boundary between training and testing for plotting
-        self.agent.testing_start_index = len(self.agent.reward)
-
-        self.testing_request_count = 0
-        self.testing_request_limit = 3000
-
-        print("\n" + "=" * 60)
-        print("[CONTROLLER] 🧪 ENTERING TESTING PHASE (3000 requests)")
-        print("=" * 60 + "\n")
-
-    def run_testing_phase(self, request):
-        # if self.testing_request_count >= self.testing_request_limit:
-        #     print("[CONTROLLER] ✅ Testing finished.")
-        #     self.generate_final_plots()
-        #     self.training_done.set()
-        #     return
-        #
-        # print(f"[CONTROLLER, TEST] Processing request {getattr(request, 'request_id', '?')}")
-        #
-        # try:
-        #     load = self.find_free_servers()
-        #     request.load = np.array(load)
-        #
-        #     request_total_delay = []
-        #     combined_strs = []
-        #
-        #     for i in range(self.num_servers):
-        #         delay, combined_str = self.server_list[i].compute_request_time(request)
-        #         request_total_delay.append(delay)
-        #         combined_strs.append(combined_str)
-        #
-        #     request.total_processing_delay = np.array(request_total_delay)
-        #     request_total_delay = [float(-1)] * self.num_servers
-        #
-        #     for i in range(len(combined_strs)):
-        #         if combined_strs[i] is not None:
-        #             request.populate_request_from_csv(i, combined_strs[i])
-        #
-        #     request.step_reward_list = self.compute_step_reward(request)
-        #
-        #     # epsilon = 0 (greedy policy)
-        #     self.agent.epsilon = 0
-        #     action_subset, action_index = self.agent.get_action(request)
-        #
-        #     request.queue_waiting_time = time.time() * 1000.0 - request.arrival_time
-        #     self.average_waiting_times.append(request.queue_waiting_time)
-        #
-        #     l = []
-        #
-        #     for i in action_subset:
-        #         _, _, processing_time, combined_str = self.server_list[i].schedule_request(request)
-        #         request_total_delay[i] = float(processing_time) * 1000.0
-        #         l.append([request_total_delay[i], combined_str])
-        #
-        #     request.total_processing_delay = np.array(request_total_delay)
-        #
-        #     final_reward_list = self.compute_step_reward(request, action_subset)
-        #     combined_step_reward = np.mean(final_reward_list)
-        #
-        #     self.step_rewards.append(combined_step_reward)
-        #
-        #     if len(l) > 0:
-        #         observed_latency = sorted(l)[0][0]
-        #         request.combination = sorted(l)[0][1]
-        #
-        #         self.episode_latencies.append(observed_latency)
-        #         deviation = abs(observed_latency - self.agent.median_computation_delay)
-        #         self.episode_deviations.append(deviation)
-        #
-        #     self.testing_request_count += 1
-        #     self.current_step += 1
-        #
-        # except Exception as e:
-        #     print(f"[CONTROLLER, TEST ERROR] {type(e).__name__} - {e}")
-        #
-        # self.agent.epsilon_curve = np.append(self.agent.epsilon_curve, self.agent.epsilon)
-        pass
+        print("[CONTROLLER] Testing phase started.")
 
     def generate_testing_plots(self):
         pass
@@ -1106,10 +1112,6 @@ class Controller:
             for request in chunk:
                 try:
                     with self.lock:
-                        # ---- Testing phase: pure exploitation, no training ----
-                        if self.testing_phase_active:
-                            self.run_testing_phase(request)
-                            continue
                         self.process_step(request)
 
                         # request combination type

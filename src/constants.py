@@ -18,13 +18,15 @@ max_interval = 0.8
 jitter = 0.02
 lr_decay_rate = 0.999
 lr_min = 1e-5
-training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_logs")
+training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_logs_1_testing")
+original_training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_logs_1")
+
 epochs = 1
 no_of_sensors = 1
 max_load = 5
 beta = 5  # Number of edge servers.
 alpha = 0.005  # Reward scaling factor.
-discount_rate = 0.95
+discount_rate = 0.9
 batch_size = 128
 nS = 1 * beta + 1  # Number of state features per step.
 nA = 2 ** beta - 1  # Number of possible actions (subsets of servers).
@@ -41,10 +43,10 @@ load_arr = []
 epsilon_min_reached = False
 post_epsilon_steps = 0
 post_epsilon_steps_target = 8000
-testing_phase_active = False
-saved_model_path = ""
-receiver_host = "127.0.0.1"
-receiver_port = int(os.environ.get("RECEIVER_PORT", 6000))
+testing_phase_active = True
+saved_model_path = "./training_logs_1/post_epsilon_min_save/model_post_eps_min_20260408_171819.keras"
+receiver_host = "127.0.0.8"
+receiver_port = int(os.environ.get("RECEIVER_PORT", 6008))
 
 BASELINE_MODE = os.environ.get("BASELINE_MODE", "safetail")
 # Options: "safetail"

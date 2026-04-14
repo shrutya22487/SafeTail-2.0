@@ -31,6 +31,7 @@ def get_subsets(fullset):
         subsets.append(np.array(subset))  # convert each subset to np.array
     return np.array(subsets[1:], dtype=object)  # return numpy array of subsets
 
+
 def request_to_state_array(request_obj, remove_nan=True):
     """
     Converts a Request object into a flattened numeric NumPy array.
@@ -109,6 +110,7 @@ def request_to_state_array(request_obj, remove_nan=True):
         print(f"[AGENT][FATAL] Could not create NumPy array: {e}")
         traceback.print_exc()
         return np.full(1, -1.0, dtype=float)
+
 
 class DQNAgent:
     def __init__(self, states, actions, alpha, reward_gamma, epsilon,
@@ -489,110 +491,115 @@ class DQNAgent:
 
         # 4. Rewards over Time
         ax4 = plt.subplot(3, 3, 4)
+
         if len(self.rewards) > 0:
-            ax4.plot(self.rewards, color='purple', alpha=0.6, linewidth=1.5)
-            if hasattr(self, "testing_start_index"):
+            ax4.plot(self.rewards, color='purple', alpha=0.7, linewidth=1.5)
+
+            if hasattr(self, "testing_start_reward_index"):
                 ax4.axvline(
-                    x=self.testing_start_index,
+                    x=self.testing_start_reward_index,
                     color='black',
                     linestyle='--',
-                    linewidth=1
+                    linewidth=1,
+                    label='Testing Starts'
                 )
-            ax4.axhline(y=np.mean(self.rewards), color='red', linestyle='--',
-                        label=f'Mean: {np.mean(self.rewards):.2f}', linewidth=2)
-            ax4.set_xlabel('Training Iteration')
+
+            ax4.set_xlabel('Episode')
             ax4.set_ylabel('Reward')
-            ax4.set_title('Rewards over Time', fontweight='bold')
+            ax4.set_title('Reward History', fontweight='bold')
             ax4.legend()
             ax4.grid(True, alpha=0.3)
-        else:
-            ax4.text(0.5, 0.5, 'No reward data yet', ha='center', va='center',
-                     fontsize=11, transform=ax4.transAxes, color='gray')
-            ax4.set_title('Rewards over Time', fontweight='bold')
 
-        # 5. Latencies
+        else:
+            ax4.text(
+                0.5, 0.5, 'No reward data yet',
+                ha='center', va='center',
+                transform=ax4.transAxes
+            )
+            ax4.set_title('Reward History', fontweight='bold')
+
         ax5 = plt.subplot(3, 3, 5)
+
         if len(self.latencies) > 0:
-            ax5.plot(self.latencies, color='brown', alpha=0.6, linewidth=1.5)
-            if hasattr(self, "testing_start_index"):
+            ax5.plot(self.latencies, color='brown', alpha=0.7, linewidth=1.4)
+
+            if hasattr(self, "testing_start_latency_index"):
                 ax5.axvline(
-                    x=self.testing_start_index,
+                    x=self.testing_start_latency_index,
                     color='black',
                     linestyle='--',
-                    linewidth=1
+                    linewidth=1,
+                    label='Testing Starts'
                 )
-            ax5.axhline(y=self.median_computation_delay, color='red', linestyle='--', linewidth=2)
-            ax5.set_xlabel('Step')
-            ax5.set_ylabel('Latency (s)')
+
+            ax5.set_xlabel('Request')
+            ax5.set_ylabel('Latency (ms)')
             ax5.set_title('Observed Latencies', fontweight='bold')
             ax5.legend()
             ax5.grid(True, alpha=0.3)
+
         else:
-            ax5.text(0.5, 0.5, 'No latency data yet', ha='center', va='center',
-                     fontsize=11, transform=ax5.transAxes, color='gray')
+            ax5.text(0.5, 0.5, 'No latency data yet',
+                     ha='center', va='center',
+                     transform=ax5.transAxes)
             ax5.set_title('Observed Latencies', fontweight='bold')
 
         # 6. Server Access Rate
         ax6 = plt.subplot(3, 3, 6)
+
         if len(self.episode_access_rate) > 0:
-            ax6.plot(self.episode_access_rate, color='teal', alpha=0.6, linewidth=1.5)
-            ax6.axhline(y=np.mean(self.episode_access_rate), color='orange', linestyle='--',
-                        label=f'Mean: {np.mean(self.episode_access_rate):.2f}', linewidth=2)
-            ax6.set_xlabel('Step')
+            ax6.plot(self.episode_access_rate, color='teal', alpha=0.7, linewidth=1.4)
+
+            self._draw_testing_boundary(ax6)
+
+            ax6.axhline(
+                y=np.mean(self.episode_access_rate),
+                color='orange',
+                linestyle='--',
+                linewidth=1.5,
+                label=f'Mean: {np.mean(self.episode_access_rate):.2f}'
+            )
+
+            ax6.set_xlabel('Episode')
             ax6.set_ylabel('Access Rate')
-            ax6.set_title('Server Access Rate (fraction)', fontweight='bold')
+            ax6.set_title('Server Access Rate', fontweight='bold')
             ax6.legend()
             ax6.grid(True, alpha=0.3)
+
         else:
-            ax6.text(0.5, 0.5, 'No access rate data yet', ha='center', va='center',
-                     fontsize=11, transform=ax6.transAxes, color='gray')
-            ax6.set_title('Server Access Rate (fraction)', fontweight='bold')
+            ax6.text(0.5, 0.5, 'No access-rate data yet',
+                     ha='center', va='center',
+                     transform=ax6.transAxes)
+            ax6.set_title('Server Access Rate', fontweight='bold')
 
         # 7. Latency Deviations
         ax7 = plt.subplot(3, 3, 7)
+
         if len(self.deviations) > 0:
-            ax7.plot(self.deviations, color='darkred', alpha=0.6, linewidth=1.5)
-            ax7.axhline(y=np.mean(self.deviations), color='blue', linestyle='--',
-                        label=f'Mean: {np.mean(self.deviations):.2f}', linewidth=2)
-            ax7.set_xlabel('Step')
-            ax7.set_ylabel('Absolute Deviation (s)')
-            ax7.set_title('Latency Deviations from Median', fontweight='bold')
+            ax7.plot(self.deviations, color='darkred', alpha=0.7, linewidth=1.4)
+
+            self._draw_testing_boundary(ax7)
+
+            if hasattr(self, "testing_start_deviation_index"):
+                ax7.axvline(
+                    x=self.testing_start_deviation_index,
+                    color='black',
+                    linestyle='--',
+                    linewidth=1,
+                    label='Testing Starts'
+                )
+
+            ax7.set_xlabel('Request')
+            ax7.set_ylabel('Deviation')
+            ax7.set_title('Latency Deviations', fontweight='bold')
             ax7.legend()
             ax7.grid(True, alpha=0.3)
+
         else:
-            ax7.text(0.5, 0.5, 'No deviation data yet', ha='center', va='center',
-                     fontsize=11, transform=ax7.transAxes, color='gray')
-            ax7.set_title('Latency Deviations from Median', fontweight='bold')
-
-        # 8. Prediction Times
-        # ax8 = plt.subplot(3, 3, 8)
-        # if len(self.prediction_times) > 0:
-        #     ax8.plot(self.prediction_times, color='magenta', alpha=0.6, linewidth=1.5)
-        #     ax8.axhline(y=np.mean(self.prediction_times), color='green', linestyle='--',
-        #                 label=f'Mean: {np.mean(self.prediction_times):.4f}s', linewidth=2)
-        #     ax8.set_xlabel('Prediction Call')
-        #     ax8.set_ylabel('Time (seconds)')
-        #     ax8.set_title('Model Prediction Times', fontweight='bold')
-        #     ax8.legend()
-        #     ax8.grid(True, alpha=0.3)
-        # else:
-        #     ax8.text(0.5, 0.5, 'No prediction time data yet', ha='center', va='center',
-        #              fontsize=11, transform=ax8.transAxes, color='gray')
-        #     ax8.set_title('Model Prediction Times', fontweight='bold')
-
-        # 9. Loss Distribution (Histogram)
-        # ax9 = plt.subplot(3, 3, 9)
-        # if len(self.loss) > 0:
-        #     ax9.hist(self.loss, bins=min(30, len(self.loss)), color='skyblue',
-        #              edgecolor='black', alpha=0.7)
-        #     ax9.set_xlabel('Loss Value')
-        #     ax9.set_ylabel('Frequency')
-        #     ax9.set_title('Training Loss Distribution', fontweight='bold')
-        #     ax9.grid(True, alpha=0.3, axis='y')
-        # else:
-        #     ax9.text(0.5, 0.5, 'No loss data yet', ha='center', va='center',
-        #              fontsize=11, transform=ax9.transAxes, color='gray')
-        #     ax9.set_title('Training Loss Distribution', fontweight='bold')
+            ax7.text(0.5, 0.5, 'No deviation data yet',
+                     ha='center', va='center',
+                     transform=ax7.transAxes)
+            ax7.set_title('Latency Deviations', fontweight='bold')
 
         plt.tight_layout()
 
@@ -606,6 +613,23 @@ class DQNAgent:
             plt.show()
         else:
             plt.close()
+
+    def _draw_testing_boundary(self, ax):
+        """
+        Draw vertical marker where testing phase starts.
+        """
+        if hasattr(self, "testing_start_index"):
+            try:
+                idx = int(self.testing_start_index)
+                ax.axvline(
+                    x=idx,
+                    color="black",
+                    linestyle="--",
+                    linewidth=1.2,
+                    label="Testing Starts"
+                )
+            except Exception:
+                pass
 
     def save_metrics_summary(self, filepath):
         """
