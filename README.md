@@ -206,7 +206,7 @@ python main.py
 
 ---
 
-## Monitoring
+## Monitoring & Stopping
 
 ```bash
 # Follow logs live
@@ -215,9 +215,14 @@ tail -f log_1.txt
 # Check if process is still running
 ps -p $(cat log_1.txt.pid)
 
-# Kill the process
-kill $(cat log_1.txt.pid)
+# Stop everything (watchdog + main.py) for the latest run
+python stop.py
+
+# Stop a specific run
+python stop.py log_2.txt
 ```
+
+> **Note:** `kill $(cat log_1.txt.pid)` only kills the watchdog — `stop.py` kills both the watchdog and the main.py it spawned.
 
 Training plots are generated every 20 episodes and saved to:
 ```

@@ -91,3 +91,5 @@ watchdog_max_restarts = 10                # give up after this many restarts
 log_file_prefix = "log"                   # log files: log_1.txt, log_2.txt, ...
 use_watchdog    = False                   # True  → run watchdog.py (auto-restarts on declining reward)
                                           # False → run main.py directly
+# python stop.py           # kills the most recently started run
+# python stop.py log_2.txt # kills a specific run 
