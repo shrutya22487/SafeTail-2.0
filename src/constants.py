@@ -74,9 +74,6 @@ BASELINE_MODE = os.environ.get("BASELINE_MODE", "safetail")
 # | "minprop_1" | "minprop_2" | "minprop_3"
 # | "rand_1"    | "rand_2"    | "rand_3"
 
-
-
-# run : python watchdog.py
 # to automate the monitoring the episodic reward curve.
 # If the reward is consistently declining after a warm-up period,
 # it kills the process and restarts from scratch.
@@ -88,3 +85,9 @@ watchdog_consecutive_bad_checks = 10      # bad checks needed before restarting
 watchdog_check_interval_sec = 30          # seconds between checks
 watchdog_max_restarts = 10                # give up after this many restarts
 # ─────────────────────────────────────────────────────────────────────────────
+
+# WHEN RUNNING ON SERVER JUST RUN: python run.py
+# log file names can be changed from here:
+log_file_prefix = "log"                   # log files: log_1.txt, log_2.txt, ...
+use_watchdog    = False                   # True  → run watchdog.py (auto-restarts on declining reward)
+                                          # False → run main.py directly

@@ -1,320 +1,241 @@
 # SafeTail 2.0
 
-![Python](https://img.shields.io/badge/Python-3.9+-blue)
-![TensorFlow](https://img.shields.io/badge/TensorFlow-Keras-orange)
-![Reinforcement Learning](https://img.shields.io/badge/AI-Reinforcement%20Learning-green)
-![Edge Computing](https://img.shields.io/badge/Domain-Edge%20Computing-purple)
-![Status](https://img.shields.io/badge/Status-Research%20Project-yellow)
+SafeTail 2.0 is a **Deep Reinforcement Learning-based workload scheduler for heterogeneous edge computing**. It uses a **DQN agent** to decide which subset of edge servers should handle each incoming request, optimising for low latency and high resource efficiency.
 
-SafeTail 2.0 is an **intelligent workload scheduling framework for heterogeneous edge computing environments** that uses **Reinforcement Learning (RL)** to dynamically allocate service requests across edge servers.
-
-This repository extends the **SafeTail 1.0 framework** by introducing a **Deep Reinforcement Learning–based controller** that learns optimal scheduling strategies based on system state, workload characteristics, and queue delays.
-
-The system is designed for **latency-sensitive applications deployed on heterogeneous edge devices**.
+It extends [SafeTail 1.0](https://arxiv.org/html/2408.17171v1) with RL-based scheduling, MLP latency prediction, deadline-aware rewards, and automated training analytics.
 
 ---
 
-# Relationship with [SafeTail 1.0](https://arxiv.org/html/2408.17171v1)
-
-SafeTail 2.0 is a **continuation of SafeTail 1.0** with major improvements in scheduling intelligence and system modeling.
-
-Key improvements include:
-
-* Reinforcement learning–based scheduling
-* Latency prediction models
-* Dynamic workload balancing
-* Queueing-theory based delay estimation
-* Episodic reward optimization
-* Extensive training analytics
-
----
-
-# System Architecture
-
-The SafeTail system consists of **three main components**:
-
-* Users
-* Controller
-* Edge Servers
-
-```mermaid
-flowchart LR
-
-U[Users] -->|Service Requests| C[Controller]
-
-C -->|Scheduling Decision| E1[Edge Server 1]
-C -->|Scheduling Decision| E2[Edge Server 2]
-C -->|Scheduling Decision| E3[Edge Server 3]
-C -->|Scheduling Decision| E4[Edge Server 4]
-
-E1 -->|Execution Result| C
-E2 -->|Execution Result| C
-E3 -->|Execution Result| C
-E4 -->|Execution Result| C
-
-C -->|Response| U
-```
-
-### Users
-
-Users submit service requests containing:
-
-* input parameters
-* service characteristics
-* network conditions
-* workload metadata
-
-### Controller
-
-The **controller acts as the central scheduler**.
-
-It:
-
-* receives incoming requests
-* monitors edge server states
-* predicts processing delays
-* assigns tasks using an RL policy
-* tracks latency and satisfaction metrics
-
-The controller observes both **static and dynamic system state**, including:
-
-Static features:
-
-* CPU speed
-* RAM
-* GPU speed
-* GPU memory
-* number of CPU cores
-
-Dynamic features:
-
-* CPU utilization
-* GPU utilization
-* memory utilization
-* queue length
-* active workload
-
-These heterogeneous server states are encoded into a unified representation before being fed into the RL model. 
-
----
-
-# Reinforcement Learning Scheduling
-
-SafeTail 2.0 uses a **Deep Q-Network (DQN)** to learn optimal server allocation strategies.
-
-The RL agent observes system state and outputs **subsets of servers** that should execute the request.
-
-Multiple servers may process the same request **redundantly** to minimize latency.
-
-### RL Decision Flow
-
-```mermaid
-flowchart TD
-
-S[System State<br>Server Metrics + Request Features]
---> E[State Encoder]
-
-E --> DQN[DQN Policy Network]
-
-DQN --> A[Select Server Subset]
-
-A --> EXEC[Execute Request on Servers]
-
-EXEC --> OBS[Observe Latency & Waiting Time]
-
-OBS --> R[Compute Reward]
-
-R --> MEM[Replay Memory]
-
-MEM --> TRAIN[Experience Replay Training]
-
-TRAIN --> DQN
-```
-
-The neural architecture includes:
-
-* **state encoder layers**
-* **global pooling**
-* **fully connected Q-network**
-
-The encoder converts variable-length state information into a fixed-dimension embedding before action prediction. 
-
----
-
-# Training Structure
-
-Training uses a **step-based and episodic reinforcement learning loop**.
-
-### Step
-
-Each **step corresponds to processing one request**.
-
-The controller:
-
-1. observes system state
-2. predicts server processing delays
-3. selects servers using the RL policy
-4. schedules execution
-5. computes step reward
-
----
-
-### Episode
-
-An **episode consists of multiple steps**.
-
-After each episode:
-
-* episodic reward is computed
-* experiences are added to replay memory
-* the DQN model is trained
-
----
-
-# Reward Mechanism
-
-SafeTail uses **two reward levels**.
-
-## Step Reward
-
-Encourages **efficient resource utilization**.
-
-The reward considers:
-
-* RAM utilization
-* CPU utilization
-* GPU utilization
-* GPU memory usage
-
-Higher reward is given to servers with **lower resource contention**.
-
----
-
-## Episodic Reward
-
-The episodic reward optimizes long-term system performance.
-
-It includes:
-
-* discounted step rewards
-* request satisfaction score
-* average waiting time
-
-The degree of satisfaction depends on whether a request finishes within **soft and hard deadline thresholds**. 
-
----
-
-# Queueing Model
-
-The controller queue is modeled as an **M/M/1 queue**.
-
-This allows estimation of waiting time:
-
-[
-W = \frac{\lambda}{\mu(\mu - \lambda)}
-]
-
-Where:
-
-* λ = arrival rate
-* μ = service rate
-
-This queue model helps estimate scheduling delays under dynamic workloads. 
-
----
-
-# Latency Modeling
-
-Computation latency is predicted using **MLP regression models** trained on experimental system traces.
-
-These models consider:
-
-* application characteristics
-* input size
-* CPU and GPU utilization
-* memory consumption
-
-This enables the controller to **predict execution delay before scheduling tasks**. 
-
----
-
-# Repository Structure
+## How It Works
 
 ```
-SafeTail-2.0
-│
-├── controller.py
-│   RL scheduling controller
-│
-├── agent.py
-│   Deep Q-Network agent implementation
-│
-├── servers.py
-│   Edge server simulation
-│
-├── user.py
-│   Request modeling
-│
-├── constants.py
-│   System configuration
-│
-├── training_logs
-│   Training metrics and plots
-│
-└── datasets / utilities
+Users → SenderBursts ──TCP──► Receiver ──► Controller ──► Edge Servers (1–5)
+                                               │
+                                           DQN Agent
+                                        (picks server subset)
 ```
 
-The controller coordinates scheduling, training, and system monitoring. 
+1. **SenderBursts** generates requests in configurable bursts and sends them over TCP.
+2. **Receiver** deserialises incoming chunks and passes them to the Controller.
+3. **Controller** queries all servers for estimated latency, feeds the request state into the DQN, and schedules it on the selected server subset.
+4. After every episode (N chunks), the Controller computes a reward and trains the DQN via experience replay.
+
+### Request Types
+
+| Type | Description | Soft deadline (D1) | Hard deadline (D2) |
+|------|-------------|--------------------|--------------------|
+| `s`  | Speech      | 100 ms             | 400 ms             |
+| `d`  | Detect      | 30 ms              | 200 ms             |
+| `p`  | Predict     | 30 ms              | 200 ms             |
+
+### Reward Structure
+
+- **Step reward** — `log((1−cpu)(1−ram)(1−gpu_mem)(1−gpu_util) + 1)` — rewards low resource utilisation on chosen servers.
+- **Episodic reward** — `Σ(γⁱ · R_step) + ω − W_avg` — adds deadline satisfaction (ω) and penalises average queue wait time.
+
+### Training Phases
+
+1. **Training** — epsilon decays from 1.0 → `epsilon_min`, experience replay trains the DQN after every episode.
+2. **Post-epsilon-min** — runs `post_epsilon_steps_target` more steps at minimum epsilon, then saves the model.
+3. **Testing** — loads the saved model, sets epsilon to 0, no further training.
 
 ---
 
-# Training Metrics
+## Project Structure
 
-During training the system records:
-
-* training loss
-* validation loss
-* reward progression
-* server access rate
-* latency statistics
-* exploration vs exploitation
-* model prediction time
-
-Plots and metrics are automatically generated during training.
-
----
-
-# Example Training Visualizations
-
-The framework produces plots such as:
-
-* loss curves
-* latency distribution
-* reward trends
-* exploration decay
-* server utilization patterns
-
-These are stored in the **training logs directory**.
+```
+SafeTail-2.0/
+├── run.py                        # Entry point — launch training on the server
+├── src/
+│   ├── constants.py              # All configuration lives here
+│   ├── main.py                   # Core training loop
+│   ├── watchdog.py               # Auto-restarts training on declining reward
+│   ├── controller.py             # RL scheduling + reward + training orchestration
+│   ├── agent.py                  # DQN agent (Encoder + DQN, experience replay)
+│   ├── servers.py                # Edge server simulation + latency prediction
+│   ├── user.py                   # Request object
+│   ├── receiver.py               # TCP socket server
+│   ├── sender_bursts.py          # Burst request generator
+│   └── server{1-5}_regressor/    # Per-server MLP latency predictors
+├── data/
+│   ├── server{1-5}.csv           # Server hardware + processing time profiles
+│   └── propagation_delays.pkl    # Propagation delay distributions
+└── training_logs_*/              # Generated during training (plots, CSVs, model)
+```
 
 ---
 
-# Use Cases
+## Configuration
 
-SafeTail is designed for **latency-sensitive edge workloads**, including:
+**Everything is configured in `src/constants.py`.** Key parameters:
 
-* computer vision inference
-* speech recognition
-* IoT analytics
-* AR / VR processing
-* real-time ML inference pipelines
+### Training
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `total_no_request` | `500000` | Total requests to send |
+| `chunk_size` | `5` | Requests per chunk |
+| `episode_size` | `4` | Chunks per episode |
+| `beta` | `5` | Number of edge servers |
+| `learning_rate` | `1e-6` | DQN learning rate |
+| `epsilon_min` | `0.1` | Minimum exploration rate |
+| `gamma_decay` | `0.002` | Epsilon decay per episode |
+| `discount_rate` | `0.9` | Reward discount factor (γ) |
+| `batch_size` | `128` | Experience replay batch size |
+
+### Deadlines
+```python
+DEADLINE_SCALE   = 1              # Multiply deadlines by this (e.g. 0.8 = tighter, 1.5 = looser)
+ORIGINAL_DEADLINES = [[[100, 400], [30, 200]]]   # [[D1_s, D2_s], [D1_dp, D2_dp]] in ms
+```
+
+### Phases
+```python
+testing_phase_active = False      # False = training, True = testing (loads saved model)
+saved_model_path     = "..."      # Path to model used during testing phase
+```
+
+### Baseline Mode
+```python
+BASELINE_MODE = "safetail"        # Which scheduling strategy to use
+```
+
+| Value | Strategy |
+|-------|----------|
+| `"safetail"` | DQN agent (default) |
+| `"minload_1/2/3"` | Pick 1/2/3 servers with lowest current load |
+| `"minprop_1/2/3"` | Pick 1/2/3 servers with lowest propagation delay |
+| `"rand_1/2/3"` | Pick 1/2/3 random servers |
+
+### Run Settings
+```python
+log_file_prefix = "log"           # Log files: log_1.txt, log_2.txt, ...
+use_watchdog    = False           # True → auto-restart if reward declines
+```
+
+### Watchdog Tuning
+```python
+watchdog_min_episodes_before_check = 30    # Warm-up episodes before any restart
+watchdog_window                    = 15    # Slope computed over last N episodes
+watchdog_slope_threshold           = -0.005 # Slope below this = bad check
+watchdog_consecutive_bad_checks    = 10    # Bad checks in a row before restart
+watchdog_check_interval_sec        = 30    # Seconds between checks
+watchdog_max_restarts              = 10    # Give up after this many restarts
+```
 
 ---
 
-# Contributors
+## Running
 
-* [**Shrutya Chawla**](https://github.com/shrutya22487/)
-* [**Shamik Sinha**](https://github.com/theshamiksinha)
-* [**Shivankar Singh**](https://github.com/BingoBoy479)
-* [**Jyoti Shokhanda**](https://github.com/Jyotishokhanda)
-* [**Arani Bhattacharya**](https://github.com/arani89)
+### On a Server (recommended)
 
+```bash
+python run.py
+```
+
+That's it. `run.py` reads all settings from `constants.py`, picks the next available log file (`log_1.txt`, `log_2.txt`, ...), detaches from the terminal (no need for `nohup`), and prints the PID and how to monitor/kill it:
+
+```
+[RUN] Script  : main.py
+[RUN] Log file: log_1.txt
+[RUN] PID     : 12345  (saved to log_1.txt.pid)
+[RUN] Monitor : tail -f log_1.txt
+[RUN] Kill    : kill $(cat log_1.txt.pid)
+```
+
+### Mode 1 — Standard Training
+
+In `constants.py`:
+```python
+testing_phase_active = False
+use_watchdog         = False
+BASELINE_MODE        = "safetail"
+```
+
+```bash
+python run.py
+```
+
+### Mode 2 — Training with Auto-Restart (Watchdog)
+
+If reward keeps declining, the watchdog kills and restarts training automatically.
+
+In `constants.py`:
+```python
+testing_phase_active = False
+use_watchdog         = True
+```
+
+```bash
+python run.py
+```
+
+The watchdog monitors the reward CSV every `watchdog_check_interval_sec` seconds. If the slope of the last `watchdog_window` episodes stays below `watchdog_slope_threshold` for `watchdog_consecutive_bad_checks` consecutive checks, it kills and restarts the process. All restarts append to the **same log file**.
+
+### Mode 3 — Testing a Saved Model
+
+In `constants.py`:
+```python
+testing_phase_active = True
+saved_model_path     = "./training_logs_1/post_epsilon_min_save/model_post_eps_min_YYYYMMDD_HHMMSS.keras"
+```
+
+```bash
+python run.py
+```
+
+Epsilon is set to 0 (pure exploitation). Training history is loaded from `training_logs_1/` so reward/latency plots are continuous across training → testing.
+
+### Mode 4 — Baseline Comparison
+
+In `constants.py`:
+```python
+BASELINE_MODE = "minload_2"       # or minprop_1, rand_3, etc.
+log_file_prefix = "minload_2"     # keep logs organised by mode
+```
+
+```bash
+python run.py
+```
+
+### Running Locally (without detaching)
+
+```bash
+cd src
+python main.py
+```
+
+---
+
+## Monitoring
+
+```bash
+# Follow logs live
+tail -f log_1.txt
+
+# Check if process is still running
+ps -p $(cat log_1.txt.pid)
+
+# Kill the process
+kill $(cat log_1.txt.pid)
+```
+
+Training plots are generated every 20 episodes and saved to:
+```
+src/training_logs_*/plots/ep<N>/all_metrics.png
+```
+
+Reward and latency CSVs are at:
+```
+src/training_logs_*/episode_rewards.csv
+src/training_logs_*/<BASELINE_MODE>_latency_log.csv
+```
+
+---
+
+## Contributors
+
+- [Shrutya Chawla](https://github.com/shrutya22487/)
+- [Shamik Sinha](https://github.com/theshamiksinha)
+- [Shivankar Singh](https://github.com/BingoBoy479)
+- [Jyoti Shokhanda](https://github.com/Jyotishokhanda)
+- [Arani Bhattacharya](https://github.com/arani89)
