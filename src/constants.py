@@ -18,7 +18,10 @@ max_interval = 0.8
 jitter = 0.02
 lr_decay_rate = 0.999
 lr_min = 1e-5
-training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_logs_1_testing")
+
+training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_logs_7_150perc_deadline")
+
+# references the logs where the logs were stored when first run was performed, WHILE TESTING PHASE IS RUNNING...
 original_training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_logs_1")
 
 epochs = 1
@@ -30,26 +33,49 @@ discount_rate = 0.9
 batch_size = 128
 nS = 1 * beta + 1  # Number of state features per step.
 nA = 2 ** beta - 1  # Number of possible actions (subsets of servers).
-exploit_or_explore = []
-epsilon_curve = []
-episode_access_rate = []
-avg_waiting_time = []
-latencies = []
-deviations = []
-rewards = []
-action = []
-load_arr = []
-
 epsilon_min_reached = False
 post_epsilon_steps = 0
 post_epsilon_steps_target = 8000
-testing_phase_active = True
+
+# Deadlines in ms: [[D1_s, D2_s], [D1_dp, D2_dp]]
+# "s" (speech) type:      D1=100ms (soft), D2=400ms (hard)
+# "d"/"p" type:           D1=30ms  (soft), D2=200ms (hard)
+
+DEADLINE_SCALE = 1.5 #change accordingly to make dealines 80% or 150% of original
+
+ORIGINAL_DEADLINES = [[100, 400], [30, 200]]
+deadlines = [[value * DEADLINE_SCALE for value in pair] for pair in ORIGINAL_DEADLINES]
+
+# true when need to run testing phase
+testing_phase_active = False
+
+# which model to use while testing
 saved_model_path = "./training_logs_1/post_epsilon_min_save/model_post_eps_min_20260408_171819.keras"
+
 receiver_host = "127.0.0.8"
-receiver_port = int(os.environ.get("RECEIVER_PORT", 6008))
+receiver_port = int(os.environ.get("RECEIVER_PORT", 6010))
 
 BASELINE_MODE = os.environ.get("BASELINE_MODE", "safetail")
 # Options: "safetail"
 # | "minload_1" | "minload_2" | "minload_3"
 # | "minprop_1" | "minprop_2" | "minprop_3"
 # | "rand_1"    | "rand_2"    | "rand_3"
+
+# to automate the monitoring the episodic reward curve.
+# If the reward is consistently declining after a warm-up period,
+# it kills the process and restarts from scratch.
+# ── Watchdog Constants ──────────────────────────────────────────────────────────────────
+watchdog_checkpoint_interval = 200   # compare reward every N episodes (200 vs 1st, 400 vs 200, ...)
+watchdog_min_improvement     = -0.05   # reward must improve by at least this much; set negative to allow some decline
+watchdog_comparison_window   = 10    # average over last N episodes at each checkpoint to smooth noise
+watchdog_check_interval_sec  = 30    # seconds between CSV reads
+watchdog_max_restarts        = 10    # give up after this many restarts
+# ─────────────────────────────────────────────────────────────────────────────
+
+# WHEN RUNNING ON SERVER JUST RUN: python run.py
+# log file names can be changed from here:
+log_file_prefix = "log_7_150perc_deadline"                   # log files: log_1.txt, log_2.txt, ...
+use_watchdog    = False                   # True  → run watchdog.py (auto-restarts on declining reward)
+                                          # False → run main.py directly
+# python stop.py           # kills the most recently started run
+# python stop.py log_2.txt # kills a specific run 
