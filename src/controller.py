@@ -134,6 +134,7 @@ class Controller:
         # print("access:", len(self.agent.episode_access_rate))
         # print("testing_start:", self.agent.testing_start_index)
 
+
     def log_request_access_rate_with_type(self, request_id, request_type, access_rate):
         try:
             row = f"{request_id},{request_type},{access_rate:.6f}\n"
