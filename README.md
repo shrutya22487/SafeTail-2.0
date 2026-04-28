@@ -13,6 +13,148 @@ This repository extends the **SafeTail 1.0 framework** by introducing a **Deep R
 The system is designed for **latency-sensitive applications deployed on heterogeneous edge devices**.
 
 ---
+# Usage Guide
+
+## 1. Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## 2. Configure Parameters
+
+Edit `src/constants.py`  to adjust:
+
+* Number of servers (`beta`)
+* Learning rate
+* Batch size
+* Reward discount factor
+* Logging folder
+* Baseline mode
+
+Example:
+
+```python
+BASELINE_MODE = "safetail"
+```
+
+Available modes:
+
+* `safetail` → RL-based scheduling
+* `minload_1`, `minload_2`, `minload_3`
+* `minprop_1`, `minprop_2`, `minprop_3`
+* `rand_1`, `rand_2`, `rand_3`
+
+---
+## 3. Navigate to src/
+
+```bash
+cd src/
+```
+
+## 4. Start Training
+
+Run main.py:
+
+```bash
+python main.py
+```
+
+This will:
+
+* Receive requests
+* Select servers using RL or baselines
+* Compute rewards
+* Train the DQN model
+* Save logs and plots 
+
+---
+
+## 5. Outputs Generated
+
+During execution, the project automatically stores:
+
+### Logs
+
+```text
+training_logs_x/
+```
+
+Contains:
+
+* step rewards
+* episodic rewards
+* latency logs
+* access rate logs
+* per request access rate logs
+
+```text
+logs_x.txt
+```
+
+will contain the logs for the training
+
+### Plots
+
+Saved under:
+
+```text
+training_logs_x/plots/
+```
+
+Includes:
+
+* Loss curves
+* Reward trends
+* Latency plots
+* Access rate plots
+
+---
+
+## 6. Running Baselines
+
+To compare with heuristic methods, change:
+
+```python
+BASELINE_MODE = "minload_2"
+```
+
+Then rerun main.
+
+---
+
+## 7. Saved Models
+
+When training finishes, trained models are saved automatically as:
+
+```text
+post_epsilon_min_save/model_*.keras
+```
+
+# Testing
+
+* in `original_training_log_folder` add the logs folder which contains the training data if available else leave empty
+* put `testing_phase_active` as True
+* put the path to the saved model in `saved_model_path` with respect to src 
+* change the hyperparameters accordingly
+* then run main again
+
+```bash
+python main.py
+```
+
+---
+
+# Notes
+
+* Uses TensorFlow/Keras DQN scheduler.
+* Supports multiple edge servers.
+* Uses real server traces from CSV datasets.
+* Generates reproducible logs for evaluation.
+
+---
 
 # Relationship with [SafeTail 1.0](https://arxiv.org/html/2408.17171v1)
 
@@ -240,32 +382,31 @@ This enables the controller to **predict execution delay before scheduling tasks
 
 # Repository Structure
 
+```text
+SafeTail-2.0/
+│── src/
+│   ├── controller.py      # Main orchestration logic for training, scheduling, rewards, logging
+│   ├── agent.py           # Deep Q-Network (DQN) agent implementation
+│   ├── servers.py         # Edge server simulation, queueing, delay prediction
+│   ├── receiver.py        # TCP receiver for incoming request chunks
+│   ├── user.py            # Request object and CSV-backed request state generation
+│   ├── constants.py       # Global hyperparameters and runtime configuration
+│
+│── data/
+│   ├── server1.csv ... server5.csv     # Resource and execution traces for each server
+│   ├── propagation_delays.pkl          # Network propagation delay dataset
+│
+│── training_logs_*/
+│   ├── step_rewards.csv               # Per-request reward logs
+│   ├── episode_rewards.csv           # Per-episode reward logs
+│   ├── access_rate_log.csv          # Server access statistics
+│   ├── plots/                      # Generated training plots
+│                   
+│── docs/                           # relevant documents for project 
+│── received_chunks/                 # Received request batches
+│── requirements.txt                # Python dependencies
+│── README.md
 ```
-SafeTail-2.0
-│
-├── controller.py
-│   RL scheduling controller
-│
-├── agent.py
-│   Deep Q-Network agent implementation
-│
-├── servers.py
-│   Edge server simulation
-│
-├── user.py
-│   Request modeling
-│
-├── constants.py
-│   System configuration
-│
-├── training_logs
-│   Training metrics and plots
-│
-└── datasets / utilities
-```
-
-The controller coordinates scheduling, training, and system monitoring. 
-
 ---
 
 # Training Metrics
@@ -280,21 +421,7 @@ During training the system records:
 * exploration vs exploitation
 * model prediction time
 
-Plots and metrics are automatically generated during training.
-
----
-
-# Example Training Visualizations
-
-The framework produces plots such as:
-
-* loss curves
-* latency distribution
-* reward trends
-* exploration decay
-* server utilization patterns
-
-These are stored in the **training logs directory**.
+Plots and metrics are automatically generated during training and can be found in **results section**
 
 ---
 
