@@ -156,7 +156,7 @@ class DQNAgent:
 
         # DEBUGGING: dump replay batches to file
         self.debug_replay_dump = False
-        self.replay_dump_file = BASE_DIR / "test_files" / "replay_debug_dump.txt"
+        self.replay_dump_file = BASE_DIR / "replay_dump" / "replay_debug_dump.txt"
         # Ensure directory exists
         self.replay_dump_file.parent.mkdir(parents=True, exist_ok=True)
         # Clear file once at start

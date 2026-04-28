@@ -27,7 +27,7 @@ class Controller:
         self.receiver_queue = None  # attached externally
 
         # Values for D1 and D2 based on the combination type of the request (e.g., "s" or "d" or "p").
-        self.deadlines = np.asarray([[150, 600], [45, 300]]) # in ms
+        self.deadlines = np.asarray(constants.deadlines)  # in ms
 
         # ---------------- Episode / Step tracking ----------------
         self.chunks_per_episode = chunks_per_episode
@@ -126,13 +126,7 @@ class Controller:
             self.load_existing_plot_history()
 
             # boundary marker for plots
-            self.agent.testing_start_index = len(self.agent.rewards) 
-
-        print("rewards:", len(self.agent.rewards))
-        print("loss:", len(self.agent.loss))
-        print("lat:", len(self.agent.latencies))
-        print("access:", len(self.agent.episode_access_rate))
-        print("testing_start:", self.agent.testing_start_index)
+            self.agent.testing_start_index = len(self.agent.rewards)
 
     def log_request_access_rate_with_type(self, request_id, request_type, access_rate):
         try:
@@ -193,9 +187,8 @@ class Controller:
         base_dir = Path(constants.original_training_log_folder)
 
         reward_csv = base_dir / "episode_rewards.csv"
-        access_csv = base_dir / "safetail_request_access_log.csv"
-        latency_csv = base_dir / f"safetail_latency_log.csv"
-
+        access_csv = base_dir / f"{constants.BASELINE_MODE}_request_access_log.csv"
+        latency_csv = base_dir / f"{constants.BASELINE_MODE}_latency_log.csv"
         # ---------------- Rewards ----------------
         if reward_csv.exists():
             df = pd.read_csv(reward_csv)

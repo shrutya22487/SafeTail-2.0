@@ -1,29 +1,31 @@
-#!/usr/bin/env python3
+import io
 import socket
 import struct
-import io
-import time
 import threading
-import numpy as np
-from pathlib import Path
+import time
 from collections import deque
+from pathlib import Path
 from typing import Optional
+
+import numpy as np
+
 import constants
 
 OUT_DIR = Path("received_chunks")
 OUT_DIR.mkdir(exist_ok=True)
 
+
 class Receiver:
     def __init__(
-        self,
-        host: str = constants.receiver_host,
-        port: int = constants.receiver_port,
-        tcp_backlog: int = 200,
-        max_queue: int = 20,
-        accept_window_sec: float = 0.15,
-        process_time_per_chunk: float = 0.20,
-        persist_chunks: bool = True,
-        controller = None,
+            self,
+            host: str = constants.receiver_host,
+            port: int = constants.receiver_port,
+            tcp_backlog: int = 200,
+            max_queue: int = 20,
+            accept_window_sec: float = 0.15,
+            process_time_per_chunk: float = 0.20,
+            persist_chunks: bool = True,
+            controller=None,
     ):
         self.host = host
         self.port = port
@@ -32,10 +34,10 @@ class Receiver:
         self.ACCEPT_WINDOW_SEC = accept_window_sec
         self.PROCESS_TIME_PER_CHUNK = process_time_per_chunk
         self.PERSIST_CHUNKS = persist_chunks
-        
-        self.controller = controller  #backlink to controller
+
+        self.controller = controller  # backlink to controller
         if controller is not None:
-            controller.receiver_queue = self    # mutual link
+            controller.receiver_queue = self  # mutual link
 
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -212,7 +214,6 @@ class Receiver:
                     now_ms = time.time() * 1000.0
                     for req in arr:
                         req.arrival_time = now_ms
-                        
 
                     # ---- Dispatch to controller ----
                     try:
@@ -241,7 +242,6 @@ class Receiver:
         finally:
             print(f"[RECEIVER, -] Finished processing {addr}")
 
-
     def run(self):
         pending = deque()
         print(f"[RECEIVER] Listening on {self.host}:{self.port} (tcp_backlog={self.tcp_backlog})")
@@ -249,14 +249,34 @@ class Receiver:
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind((self.host, self.port))
+
+            max_retries = 10
+            retry_delay = 5  # seconds
+            for attempt in range(max_retries):
+                try:
+                    s.bind((self.host, self.port))
+                    break
+                except OSError as e:
+                    import errno
+                    if e.errno == errno.EADDRINUSE:
+                        if attempt < max_retries - 1:
+                            print(
+                                f"[RECEIVER] Port {self.port} in use, retrying in {retry_delay}s... ({attempt + 1}/{max_retries})")
+                            time.sleep(retry_delay)
+                        else:
+                            print(f"[RECEIVER] Port {self.port} still in use after {max_retries} attempts. Giving up.")
+                            raise
+                    else:
+                        raise
+
             s.listen(self.tcp_backlog)
             s.settimeout(0.5)
 
             try:
                 while not self._stop_event.is_set():
                     accept_deadline = time.time() + self.ACCEPT_WINDOW_SEC
-                    while time.time() < accept_deadline and len(pending) < self.MAX_QUEUE and not self._stop_event.is_set():
+                    while time.time() < accept_deadline and len(
+                            pending) < self.MAX_QUEUE and not self._stop_event.is_set():
                         try:
                             remain = accept_deadline - time.time()
                             s.settimeout(remain if remain > 0.01 else 0.01)

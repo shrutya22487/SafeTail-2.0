@@ -18,7 +18,10 @@ max_interval = 0.8
 jitter = 0.02
 lr_decay_rate = 0.999
 lr_min = 1e-5
+
 training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_logs_1_testing")
+
+# references the logs where the logs were stored when first run was performed, WHILE TESTING PHASE IS RUNNING...
 original_training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_logs_1")
 
 epochs = 1
@@ -43,8 +46,23 @@ load_arr = []
 epsilon_min_reached = False
 post_epsilon_steps = 0
 post_epsilon_steps_target = 8000
+
+# Deadlines in ms: [[D1_s, D2_s], [D1_dp, D2_dp]]
+# "s" (speech) type:      D1=100ms (soft), D2=400ms (hard)
+# "d"/"p" type:           D1=30ms  (soft), D2=200ms (hard)
+
+DEADLINE_SCALE = 1 #change accordingly to make dealines 80% or 150% of original
+
+ORIGINAL_DEADLINES = [[100, 400], [30, 200]]
+deadlines = [[value * DEADLINE_SCALE for value in pair] for pair in ORIGINAL_DEADLINES]
+
+
+# true when need to run testing phase
 testing_phase_active = True
+
+# which model to use while testing
 saved_model_path = "./training_logs_1/post_epsilon_min_save/model_post_eps_min_20260408_171819.keras"
+
 receiver_host = "127.0.0.8"
 receiver_port = int(os.environ.get("RECEIVER_PORT", 6008))
 
@@ -53,3 +71,4 @@ BASELINE_MODE = os.environ.get("BASELINE_MODE", "safetail")
 # | "minload_1" | "minload_2" | "minload_3"
 # | "minprop_1" | "minprop_2" | "minprop_3"
 # | "rand_1"    | "rand_2"    | "rand_3"
+
