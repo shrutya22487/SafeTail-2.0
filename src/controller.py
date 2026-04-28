@@ -85,9 +85,9 @@ class Controller:
         self.episode_deviations = []  # Track deviations per episode
 
         # ---------------- Post-epsilon-min phase ----------------
-        self.epsilon_min_reached = constants.epsilon_min_reached  # flag: epsilon has hit its floor
-        self.post_epsilon_steps = constants.post_epsilon_steps  # steps counted after epsilon_min reached
-        self.post_epsilon_steps_target = constants.post_epsilon_steps_target  # run this many steps before saving + testing
+        self.epsilon_min_reached = False  # flag: epsilon has hit its floor
+        self.post_epsilon_steps = 0  # steps counted after epsilon_min reached
+        self.post_epsilon_steps_target = constants.post_epsilon_steps  # run this many steps before saving + testing
         self.testing_phase_active = constants.testing_phase_active  # flag: we are now in the testing phase
 
         # ── BASELINE MODE ────────────────────────────────────────────────────────
@@ -223,6 +223,7 @@ class Controller:
         print("Rewards :", len(self.agent.rewards))
         print("Latency :", len(self.agent.latencies))
         print("Access  :", len(self.agent.episode_access_rate))
+
     def find_free_servers(self):
         now = time.time()
         load = [s.check_server_availability(now) for s in self.server_list]

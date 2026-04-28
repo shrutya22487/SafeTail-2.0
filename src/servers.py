@@ -10,9 +10,6 @@ import pandas as pd
 
 import user
 
-# fixed bandwidth (kbps) used for both uplink and downlink when request doesn't specify bandwidth/load
-FIXED_BANDWIDTH_KBPS = 1000.0
-
 MAX_CONCURRENT_REQUESTS = 4
 
 
@@ -41,7 +38,6 @@ class Server:
         self.requests = []
         self.active_requests = []
 
-        # Attempt to import predictor classes from server{index}_regressor folder only
         self._load_predictors_from_regressor_folder(base_dir, server_index)
 
     def _load_predictors_from_regressor_folder(self, base_dir: Path, server_index: int):
@@ -80,7 +76,6 @@ class Server:
                 self.predictors['p'] = None
 
         finally:
-            # keep path inserted for the runtime; remove if you prefer cleanup
             pass
 
     def print_active_requests(self):
@@ -95,7 +90,7 @@ class Server:
     def _get_propogation_delay(self):
         return random.choice(self.propagation_delays[self.server_index - 1])
 
-    def _get_tramission_delay(self, message_size_bytes, upload_bandwidth_kbps, download_bandwidth_kbps):
+    def _get_tramission_delay(self):
         return random.choice([18.5, 19.2, 20, 21.5, 22]) / 1000
 
     def _collect_visible_types(self):
@@ -116,7 +111,6 @@ class Server:
 
         predictor = self.predictors.get(letter.lower())
         if predictor is None:
-            # fallback to CSV value if available
             try:
                 mask = self.server_data['Combination'].astype(str).str.strip().str.lower() == letter.lower()
                 if mask.any():
@@ -132,7 +126,6 @@ class Server:
             # print(f"\n[SERVER]    Using predictor for letter '{letter}' with combined string '{combined_str}'\n")
             return float(predictor.predict_from_combination(combined_str))
         except Exception:
-            # fallback to CSV
             try:
                 mask = self.server_data['Combination'].astype(str).str.strip().str.lower() == letter.lower()
                 if mask.any():
@@ -172,34 +165,27 @@ class Server:
 
         # 2) transmission (use fixed bandwidth; request may not have load or bandwidth)
         try:
-            # If request has a bandwidth attribute and load (deprecated), we ignore it per new requirement.
-            upl = FIXED_BANDWIDTH_KBPS
-            down = FIXED_BANDWIDTH_KBPS
-            tramission_delay_for_node = self._get_tramission_delay(
-                getattr(request, 'message_size', 0),
-                upl,
-                down
-            )
+            transmission_delay_for_node = self._get_tramission_delay()
         except Exception as e:
             print(f"[SERVER]    [ERROR] Unexpected error in transmission delay calculation: {e}")
-            tramission_delay_for_node = float('inf')
+            transmission_delay_for_node = float('inf')
 
         # 3) computation: determine first letter and use predictor
         first_letter, combined_str = self._choose_first_letter_for_regressor(request)
         computation_delay_for_node = self._predict_using_letter(first_letter, combined_str)
 
         # print("propagation_delay_for_node: ", propagation_delay_for_node *1000)
-        # print("transmission_delay_for_node: ", tramission_delay_for_node*1000)
+        # print("transmission_delay_for_node: ", transmission_delay_for_node*1000)
         # print("computation_delay_for_node: ", computation_delay_for_node*1000)
         # print("computation_delay_for_node: ", computation_delay_for_node*1000)
 
-        total_delay = propagation_delay_for_node + tramission_delay_for_node + computation_delay_for_node
+        total_delay = propagation_delay_for_node + transmission_delay_for_node + computation_delay_for_node
         return (
             total_delay,
             combined_str,
             computation_delay_for_node,
             propagation_delay_for_node,
-            tramission_delay_for_node,
+            transmission_delay_for_node,
         )
 
     def schedule_request(self, request: user.Request, current_time: float = None, do_sleep: bool = False):
@@ -215,14 +201,14 @@ class Server:
              combined_str,
              computation_delay_for_node,
              propagation_delay_for_node,
-             tramission_delay_for_node) = self.compute_request_time(request)
-            return False, "server full", total_delay, combined_str, computation_delay_for_node, propagation_delay_for_node,tramission_delay_for_node
+             transmission_delay_for_node) = self.compute_request_time(request)
+            return False, "server full", total_delay, combined_str, computation_delay_for_node, propagation_delay_for_node, transmission_delay_for_node
 
         (total_delay,
          combined_str,
          computation_delay_for_node,
          propagation_delay_for_node,
-         tramission_delay_for_node) = self.compute_request_time(request)
+         transmission_delay_for_node) = self.compute_request_time(request)
         start_time = current_time
         finish_time = start_time + total_delay
 
@@ -241,7 +227,7 @@ class Server:
             time.sleep(total_delay)
             self.update_active_requests(current_time=time.time())
 
-        return True, finish_time, total_delay, combined_str, computation_delay_for_node, propagation_delay_for_node, tramission_delay_for_node
+        return True, finish_time, total_delay, combined_str, computation_delay_for_node, propagation_delay_for_node, transmission_delay_for_node
 
     # ---------- Remaining helpers ----------
     def update_active_requests(self, current_time: float = None):
@@ -267,7 +253,7 @@ class Server:
             current_time = time.time()
         self.update_active_requests(current_time=current_time)
 
-        if (self.num_requests < MAX_CONCURRENT_REQUESTS):
+        if self.num_requests < MAX_CONCURRENT_REQUESTS:
             return self.num_requests
         else:
             return -1
