@@ -2,7 +2,7 @@
 
 # Run all 9 baseline experiments simultaneously.
 # Each gets a unique port, its own training_logs folder, and its own log file.
-# CSVs are saved to src/logs/
+# CSVs are saved to src/results/
 # Usage: bash run_all_baselines.sh
 
 PYTHON=/home/jyoti/miniconda3/bin/python

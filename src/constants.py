@@ -32,7 +32,7 @@ post_epsilon_steps = 8000
 
 training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_logs_1_testing")
 
-# references the logs where the logs were stored when first run was performed, WHILE TESTING PHASE IS RUNNING...
+# references the results where the results were stored when first run was performed, WHILE TESTING PHASE IS RUNNING...
 original_training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_logs_1")
 
 ############################### DEADLINES ##########################

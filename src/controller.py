@@ -181,7 +181,7 @@ class Controller:
 
     def load_existing_plot_history(self):
         """
-        Load previous logs and set testing-start indices correctly.
+        Load previous results and set testing-start indices correctly.
         """
 
         base_dir = Path(constants.original_training_log_folder)
