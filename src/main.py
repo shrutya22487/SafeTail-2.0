@@ -29,7 +29,7 @@ logger.setLevel(logging.INFO)
 
 # ---- load server CSVs once (NOT per request) ----
 BASE_DIR = Path(__file__).resolve().parent.parent  # go from src/ -> project root
-DATA_DIR = BASE_DIR / "data"
+DATA_DIR = BASE_DIR / "dataset"
 
 SERVER_CSVS = [
     DATA_DIR / "server1.csv",

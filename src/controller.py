@@ -210,7 +210,7 @@ class Controller:
         # =====================================================
         # IMPORTANT:
         # Since old history = training history,
-        # testing starts AFTER loaded data
+        # testing starts AFTER loaded dataset
         # =====================================================
         self.agent.testing_start_reward_index = len(self.agent.rewards)
         self.agent.testing_start_latency_index = len(self.agent.latencies)
@@ -584,7 +584,7 @@ class Controller:
         request_total_delay = [float(
             -1)] * self.num_servers  # reset to later use for tracking observed latency after action is taken (i.e. when request is scheduled and completed)
 
-        # Update request state to add data from servers
+        # Update request state to add dataset from servers
         for i in range(len(combined_strs)):
             server_index = i
             try:
@@ -966,7 +966,7 @@ class Controller:
     def generate_final_plots(self):
         """
         Generate final comprehensive plots at the end of training.
-        These are higher quality and include all data.
+        These are higher quality and include all dataset.
         """
         print("\n" + "=" * 60)
         print("[CONTROLLER] 🎨 Generating final training visualizations...")
@@ -993,7 +993,7 @@ class Controller:
             #     final_dir / f"final_summary_{timestamp}.txt"
             # )
 
-            # # 4. Export training data to CSV for external analysis
+            # # 4. Export training dataset to CSV for external analysis
             # self.export_training_data(final_dir / f"training_data_{timestamp}.csv")
 
             print(f"[CONTROLLER] ✅ Final plots saved to {final_dir}")
@@ -1030,7 +1030,7 @@ class Controller:
         #         return arr
 
         #     # Create DataFrame
-        #     data = {
+        #     dataset = {
         #         "episode": range(max_len),
         #         "loss": pad_to_length(self.agent.loss, max_len),
         #         "val_loss": pad_to_length(self.agent.val_loss, max_len),
@@ -1043,12 +1043,12 @@ class Controller:
         #         "prediction_time": pad_to_length(self.agent.prediction_times, max_len),
         #     }
 
-        #     df = pd.DataFrame(data)
+        #     df = pd.DataFrame(dataset)
         #     df.to_csv(filepath, index=False)
-        #     print(f"[CONTROLLER] 💾 Training data exported to {filepath}")
+        #     print(f"[CONTROLLER] 💾 Training dataset exported to {filepath}")
 
         # except Exception as e:
-        #     print(f"[CONTROLLER] ⚠️ Failed to export training data: {type(e).__name__} - {e}")
+        #     print(f"[CONTROLLER] ⚠️ Failed to export training dataset: {type(e).__name__} - {e}")
         pass
 
     def save_checkpoint(self):

@@ -24,7 +24,7 @@ def _get_server_df(server_idx: int) -> pd.DataFrame:
         return _CSV_CACHE[server_idx]
 
     base_dir = Path(__file__).resolve().parent.parent  # Safetail/
-    data_dir = base_dir / "data"
+    data_dir = base_dir / "dataset"
     csv_path = data_dir / f"server{server_idx}.csv"
 
     if not csv_path.exists():
@@ -61,7 +61,7 @@ class Request:
     Pickle-safe Request object.
 
     server_dicts:
-        Rich, semantic, structured data for inspection & debugging
+        Rich, semantic, structured dataset for inspection & debugging
 
     server_np:
         Flat numeric projection for computation / scheduling / ML

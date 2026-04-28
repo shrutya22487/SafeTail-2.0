@@ -12,7 +12,7 @@ class SpeechPredictor:
         base_dir = Path(__file__).resolve().parent
 
         self.model_path = base_dir.parent.parent / "models" / "server1" / "speech_regressor_model.pkl"
-        self.csv_path = base_dir.parent.parent / "data" / "server1.csv"
+        self.csv_path = base_dir.parent.parent / "dataset" / "server1.csv"
 
         with open(self.model_path, "rb") as f:
             saved = pickle.load(f)

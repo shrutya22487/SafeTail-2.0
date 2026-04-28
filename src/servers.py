@@ -21,17 +21,17 @@ class Server:
         base_dir = Path(__file__).resolve().parent  # Points to src/
 
         # Load propagation delays
-        propagation_file = base_dir.parent / "data" / "propagation_delays.pkl"
+        propagation_file = base_dir.parent / "dataset" / "propagation_delays.pkl"
         if not propagation_file.exists():
             raise FileNotFoundError(f"Propagation delays file not found: {propagation_file}")
 
         with open(propagation_file, 'rb') as f:
             self.propagation_delays = pickle.load(f)
 
-        # Load server data path
-        self.server_data_path = base_dir.parent / "data" / f"server{server_index}.csv"
+        # Load server dataset path
+        self.server_data_path = base_dir.parent / "dataset" / f"server{server_index}.csv"
         if not self.server_data_path.exists():
-            raise FileNotFoundError(f"Server data CSV not found: {self.server_data_path}")
+            raise FileNotFoundError(f"Server dataset CSV not found: {self.server_data_path}")
 
         self.server_data = pd.read_csv(self.server_data_path)
         self.server_data.columns = [c.strip() for c in self.server_data.columns]

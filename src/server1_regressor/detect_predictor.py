@@ -17,7 +17,7 @@ class DetectPredictor:
             base_dir.parent.parent / "models" / "server1" / "detect_regressor_model.pkl"
         )
         self.csv_path = (
-            base_dir.parent.parent / "data" / "server1.csv"
+            base_dir.parent.parent / "dataset" / "server1.csv"
         )
 
         if not self.model_path.exists():

@@ -393,7 +393,7 @@ class DQNAgent:
             show_plot (bool): Whether to display the plot interactively.
         """
         if len(self.loss) == 0:
-            print("[AGENT] No training loss data to plot.")
+            print("[AGENT] No training loss dataset to plot.")
             return
 
         plt.figure(figsize=(12, 6))
@@ -417,7 +417,7 @@ class DQNAgent:
             plt.grid(True, alpha=0.3)
             plt.legend()
         else:
-            plt.text(0.5, 0.5, 'No validation loss data',
+            plt.text(0.5, 0.5, 'No validation loss dataset',
                      ha='center', va='center', fontsize=14)
 
         plt.tight_layout()
@@ -434,7 +434,7 @@ class DQNAgent:
     def plot_all_metrics(self, save_dir=None, show_plot=True):
         """
         Create comprehensive visualization of all training metrics.
-        Only shows plots with available data, displays 'No data yet' for empty arrays.
+        Only shows plots with available dataset, displays 'No dataset yet' for empty arrays.
 
         Args:
             save_dir (str, optional): Directory to save plots. If None, plots are not saved.
@@ -458,7 +458,7 @@ class DQNAgent:
             ax1.legend()
             ax1.grid(True, alpha=0.3)
         else:
-            ax1.text(0.5, 0.5, 'No loss data yet', ha='center', va='center',
+            ax1.text(0.5, 0.5, 'No loss dataset yet', ha='center', va='center',
                      fontsize=11, transform=ax1.transAxes, color='gray')
             ax1.set_title('Loss Curves', fontweight='bold')
 
@@ -471,7 +471,7 @@ class DQNAgent:
             ax2.set_title('Exploration Rate (Epsilon) Decay', fontweight='bold')
             ax2.grid(True, alpha=0.3)
         else:
-            ax2.text(0.5, 0.5, 'No epsilon data yet', ha='center', va='center',
+            ax2.text(0.5, 0.5, 'No epsilon dataset yet', ha='center', va='center',
                      fontsize=11, transform=ax2.transAxes, color='gray')
             ax2.set_title('Exploration Rate (Epsilon) Decay', fontweight='bold')
 
@@ -485,7 +485,7 @@ class DQNAgent:
             ax3.set_title('Exploration vs Exploitation', fontweight='bold')
             ax3.grid(True, alpha=0.3, axis='y')
         else:
-            ax3.text(0.5, 0.5, 'No strategy data yet', ha='center', va='center',
+            ax3.text(0.5, 0.5, 'No strategy dataset yet', ha='center', va='center',
                      fontsize=11, transform=ax3.transAxes, color='gray')
             ax3.set_title('Exploration vs Exploitation', fontweight='bold')
 
@@ -512,7 +512,7 @@ class DQNAgent:
 
         else:
             ax4.text(
-                0.5, 0.5, 'No reward data yet',
+                0.5, 0.5, 'No reward dataset yet',
                 ha='center', va='center',
                 transform=ax4.transAxes
             )
@@ -539,7 +539,7 @@ class DQNAgent:
             ax5.grid(True, alpha=0.3)
 
         else:
-            ax5.text(0.5, 0.5, 'No latency data yet',
+            ax5.text(0.5, 0.5, 'No latency dataset yet',
                      ha='center', va='center',
                      transform=ax5.transAxes)
             ax5.set_title('Observed Latencies', fontweight='bold')
@@ -567,7 +567,7 @@ class DQNAgent:
             ax6.grid(True, alpha=0.3)
 
         else:
-            ax6.text(0.5, 0.5, 'No access-rate data yet',
+            ax6.text(0.5, 0.5, 'No access-rate dataset yet',
                      ha='center', va='center',
                      transform=ax6.transAxes)
             ax6.set_title('Server Access Rate', fontweight='bold')
@@ -596,7 +596,7 @@ class DQNAgent:
             ax7.grid(True, alpha=0.3)
 
         else:
-            ax7.text(0.5, 0.5, 'No deviation data yet',
+            ax7.text(0.5, 0.5, 'No deviation dataset yet',
                      ha='center', va='center',
                      transform=ax7.transAxes)
             ax7.set_title('Latency Deviations', fontweight='bold')
