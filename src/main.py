@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-"""
-main.py
-
-Run Receiver in background and SenderBursts in foreground.
-This request_factory constructs user.Request objects using the correct signature.
-"""
-
 import inspect
 import logging
 import random

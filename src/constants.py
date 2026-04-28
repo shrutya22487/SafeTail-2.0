@@ -30,9 +30,10 @@ post_epsilon_steps = 8000
 
 ############################### TRAINING LOGS ##########################
 
-training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_logs_1_testing")
+training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_logs_1")
 
-# references the results where the results were stored when first run was performed, WHILE TESTING PHASE IS RUNNING...
+# references the results where the results were stored when first run was performed, WHILE TESTING PHASE IS RUNNING,
+# leave same as `training_log_folder` if training for first time
 original_training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_logs_1")
 
 ############################### DEADLINES ##########################
@@ -41,7 +42,7 @@ original_training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_l
 # "s" (speech) type:      D1=100ms (soft), D2=400ms (hard)
 # "d"/"p" type:           D1=30ms  (soft), D2=200ms (hard)
 
-DEADLINE_SCALE = 1  # change accordingly to make dealines 80% or 150% of original
+DEADLINE_SCALE = 1  # change accordingly to make deadlines 80% or 150% of original
 
 ORIGINAL_DEADLINES = [[100, 400], [30, 200]]
 deadlines = [[value * DEADLINE_SCALE for value in pair] for pair in ORIGINAL_DEADLINES]
@@ -49,15 +50,15 @@ deadlines = [[value * DEADLINE_SCALE for value in pair] for pair in ORIGINAL_DEA
 ############################### TESTING ##########################
 
 # true when need to run testing phase
-testing_phase_active = True
+testing_phase_active = False
 
 # which model to use while testing
 saved_model_path = ""
 
 ############################### ADDRESS CONFIGURATION ##########################
 
-receiver_host = "127.0.0.8"
-receiver_port = int(os.environ.get("RECEIVER_PORT", 6008))
+receiver_host = "127.0.0.1"
+receiver_port = int(os.environ.get("RECEIVER_PORT", 6001))
 
 ############################### BASELINE COMPARISON ##########################
 
