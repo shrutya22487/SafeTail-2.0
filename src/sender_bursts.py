@@ -1,40 +1,44 @@
-#!/usr/bin/env python3
-import threading
-import struct
-import socket
 import io
-import time
 import random
-import numpy as np
+import socket
+import struct
+import threading
+import time
 from typing import Callable, Optional
-import user
+
+import numpy as np
+
 import constants
+import user
+
 
 def _send_length_prefixed(conn, data_bytes: bytes):
     conn.sendall(struct.pack(">Q", len(data_bytes)) + data_bytes)
+
 
 def _make_payload_from_array(arr: np.ndarray) -> bytes:
     buf = io.BytesIO()
     np.save(buf, arr, allow_pickle=True)
     return buf.getvalue()
 
+
 class SenderBursts:
     def __init__(
-        self,
-        arr: Optional[np.ndarray] = None,
-        host: str = constants.receiver_host,
-        port: int = constants.receiver_port,
-        total: Optional[int] = None,
-        chunk_size: int = 10,
-        bursts: int = 8,
-        min_burst: int = 1,
-        max_burst: int = 4,
-        min_interval: float = 0.2,
-        max_interval: float = 1.0,
-        jitter: float = 0.02,
-        worker_timeout: float = 5.0,
-        sample_count: int = 0,
-        request_factory: Optional[Callable[[int], object]] = None,
+            self,
+            arr: Optional[np.ndarray] = None,
+            host: str = constants.receiver_host,
+            port: int = constants.receiver_port,
+            total: Optional[int] = None,
+            chunk_size: int = 10,
+            bursts: int = 8,
+            min_burst: int = 1,
+            max_burst: int = 4,
+            min_interval: float = 0.2,
+            max_interval: float = 1.0,
+            jitter: float = 0.02,
+            worker_timeout: float = 5.0,
+            sample_count: int = 0,
+            request_factory: Optional[Callable[[int], object]] = None,
     ):
         self.host = host
         self.port = port
@@ -60,6 +64,7 @@ class SenderBursts:
                         return user.Request(request_id=int(i), process_id=int(i))
                     except Exception:
                         return user.Request(int(i), int(i))
+
                 request_factory = default_factory
 
             generated = [request_factory(i) for i in range(sample_count)]
@@ -102,7 +107,8 @@ class SenderBursts:
             burst_size = random.randint(self.min_burst, self.max_burst)
             burst_size = min(burst_size, self.total_chunks - ptr)
 
-            print(f"\n[SENDER] Burst {burst_no}/{self.bursts}: launching {burst_size} workers (chunks {ptr}..{ptr+burst_size-1})")
+            print(
+                f"\n[SENDER] Burst {burst_no}/{self.bursts}: launching {burst_size} workers (chunks {ptr}..{ptr + burst_size - 1})")
 
             threads = []
             results = [None] * burst_size

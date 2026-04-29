@@ -1,14 +1,16 @@
 import random
-import numpy as np
 import time
-from collections import deque
-import tensorflow.keras as keras
-import matplotlib.pyplot as plt
-import tensorflow as tf
 import traceback
+from collections import deque
 from pathlib import Path
-import constants
+
+import matplotlib.pyplot as plt
+import numpy as np
+import tensorflow as tf
+import tensorflow.keras as keras
 from tensorflow.keras import layers
+
+import constants
 import servers
 import user
 

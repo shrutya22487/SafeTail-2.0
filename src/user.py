@@ -1,7 +1,8 @@
-from typing import Dict, Any, Optional, List
-from pathlib import Path
-import numpy as np
 import time as time
+from pathlib import Path
+from typing import Dict, Any, Optional, List
+
+import numpy as np
 import pandas as pd
 
 # ==================================================
@@ -19,7 +20,7 @@ def _get_server_df(server_idx: int) -> pd.DataFrame:
     - Indexed by 'Combination' for O(1) lookup
     - Treated as read-only
     """
-    server_idx = server_idx+1
+    server_idx = server_idx + 1
     if server_idx in _CSV_CACHE:
         return _CSV_CACHE[server_idx]
 
@@ -39,6 +40,7 @@ def _get_server_df(server_idx: int) -> pd.DataFrame:
     _CSV_CACHE[server_idx] = df
     return df
 
+
 def _to_float_array(val) -> np.ndarray:
     """
     Robustly convert CSV cell values into a float numpy array.
@@ -56,6 +58,7 @@ def _to_float_array(val) -> np.ndarray:
 
     return np.asarray([], dtype=float)
 
+
 class Request:
     """
     Pickle-safe Request object.
@@ -68,19 +71,19 @@ class Request:
     """
 
     def __init__(
-        self,
-        request_id: int,
-        process_id: int,
-        combination: str,
-        message_size: int,
-        bandwidth:int,
-        load: np.ndarray,
-        deadline: np.array
+            self,
+            request_id: int,
+            process_id: int,
+            combination: str,
+            message_size: int,
+            bandwidth: int,
+            load: np.ndarray,
+            deadline: np.array
     ):
         self.request_id = int(request_id)
         self.process_id = int(process_id)
         self.combination = combination
-        self.deadline = np.asarray([],dtype = float)
+        self.deadline = np.asarray([], dtype=float)
         self.arrival_time = time.time() * 1000.0
         self.queue_waiting_time = 0.0
         self.message_size = int(message_size)
@@ -96,29 +99,29 @@ class Request:
     # STRUCTURE FILL
     # ==================================================
     def fill_server_dict(
-        self,
-        server_idx: int,
-        *,
-        ram_usage: float,
-        cpu_usage: np.ndarray,
-        duration: np.ndarray,
-        time_exec: float,
-        time_process: float,
-        time_indi_script_process: np.ndarray,
-        time_indi_script_exec: np.ndarray,
-        files_per_script: np.ndarray,
-        gpu_usage: int,
-        gpu_memory: float,
-        cpu_core_usage: np.ndarray,
-        cpu_core_used: int,
-        total_ram: float,
-        total_cpu_cores: int,
-        total_gpu_memory: float,
-        cpu_model: Optional[str],
-        gpu_model: Optional[str],
-        cpu_clock: np.ndarray,
-        gpu_clock: np.ndarray,
-        extras: Optional[Dict[str, Any]] = None,
+            self,
+            server_idx: int,
+            *,
+            ram_usage: float,
+            cpu_usage: np.ndarray,
+            duration: np.ndarray,
+            time_exec: float,
+            time_process: float,
+            time_indi_script_process: np.ndarray,
+            time_indi_script_exec: np.ndarray,
+            files_per_script: np.ndarray,
+            gpu_usage: int,
+            gpu_memory: float,
+            cpu_core_usage: np.ndarray,
+            cpu_core_used: int,
+            total_ram: float,
+            total_cpu_cores: int,
+            total_gpu_memory: float,
+            cpu_model: Optional[str],
+            gpu_model: Optional[str],
+            cpu_clock: np.ndarray,
+            gpu_clock: np.ndarray,
+            extras: Optional[Dict[str, Any]] = None,
     ) -> None:
 
         if not 0 <= server_idx <= len(self.server_dicts):
@@ -154,24 +157,24 @@ class Request:
     # COMPUTATION FILL (NUMBERS ONLY)
     # ==================================================
     def fill_server_np(
-        self,
-        server_idx: int,
-        *,
-        ram_usage: float,
-        gpu_usage: int,
-        gpu_memory: float,
-        time_exec: float,
-        time_process: float,
-        cpu_core_used: int,
-        total_ram: float,
-        total_cpu_cores: int,
-        total_gpu_memory: float,
-        cpu_usage: np.ndarray,
-        time_indi_script_process: np.ndarray,
-        time_indi_script_exec: np.ndarray,
-        files_per_script: np.ndarray,
-        cpu_clock: np.ndarray,
-        gpu_clock: np.ndarray,
+            self,
+            server_idx: int,
+            *,
+            ram_usage: float,
+            gpu_usage: int,
+            gpu_memory: float,
+            time_exec: float,
+            time_process: float,
+            cpu_core_used: int,
+            total_ram: float,
+            total_cpu_cores: int,
+            total_gpu_memory: float,
+            cpu_usage: np.ndarray,
+            time_indi_script_process: np.ndarray,
+            time_indi_script_exec: np.ndarray,
+            files_per_script: np.ndarray,
+            cpu_clock: np.ndarray,
+            gpu_clock: np.ndarray,
     ) -> None:
         """
         Numeric projection layout (ORDER IS CONTRACT):
@@ -228,7 +231,6 @@ class Request:
     # ==================================================
     def populate_request_from_csv(self, server_idx: int, combined_str: str) -> None:
         df = _get_server_df(server_idx)
-        # print('a')
         if combined_str not in df.index:
             raise ValueError(
                 f"No row for combination '{combined_str}' "
@@ -238,7 +240,6 @@ class Request:
         row = df.loc[combined_str]
         if isinstance(row, pd.DataFrame):
             row = row.iloc[0]
-        # print('a')
         ram_usage = float(row.get("Peak RAM Usage (MB)", 0.0))
         gpu_usage = int(row.get("Peak GPU Usage (%)", 0))
         gpu_memory = float(row.get("Peak GPU Memory (MB)", 0.0))
@@ -270,7 +271,6 @@ class Request:
         )
 
         duration = np.asarray([time_exec], dtype=float)
-        
 
         self.fill_server_dict(
             server_idx,
@@ -293,7 +293,7 @@ class Request:
             gpu_model=gpu_model,
             cpu_clock=cpu_clock,
             gpu_clock=gpu_clock,
-            
+
         )
 
         self.fill_server_np(

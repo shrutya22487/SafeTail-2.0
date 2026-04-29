@@ -100,8 +100,8 @@ class Controller:
         base_log_dir = Path(constants.training_log_folder)
         base_log_dir.mkdir(parents=True, exist_ok=True)
 
-        self.latency_log_path = base_log_dir / f"{self.BASELINE_MODE}_latency_log.csv"
-        self.request_access_log_path = base_log_dir / f"{self.BASELINE_MODE}_request_access_log.csv"
+        self.latency_log_path = base_log_dir / f"latency_log.csv"
+        self.request_access_log_path = base_log_dir / f"request_wise_access_log.csv"
         self.latency_log_path.parent.mkdir(parents=True, exist_ok=True)
         self.request_access_log_path.parent.mkdir(parents=True, exist_ok=True)
         self.step_reward_log_path = base_log_dir / "step_rewards.csv"
@@ -187,8 +187,8 @@ class Controller:
         base_dir = Path(constants.original_training_log_folder)
 
         reward_csv = base_dir / "episode_rewards.csv"
-        access_csv = base_dir / f"{constants.BASELINE_MODE}_request_access_log.csv"
-        latency_csv = base_dir / f"{constants.BASELINE_MODE}_latency_log.csv"
+        access_csv = base_dir / f"request_wise_access_log.csv"
+        latency_csv = base_dir / f"latency_log.csv"
         # ---------------- Rewards ----------------
         if reward_csv.exists():
             df = pd.read_csv(reward_csv)
@@ -895,7 +895,7 @@ class Controller:
 
         print("[CONTROLLER] Saving model and entering testing phase...")
 
-        save_dir = Path(constants.training_log_folder) / "post_epsilon_min_save"
+        save_dir = Path(constants.training_log_folder) / "saved_models"
         save_dir.mkdir(parents=True, exist_ok=True)
 
         model_path = save_dir / f"model_post_eps_min_{time.strftime('%Y%m%d_%H%M%S')}.keras"
