@@ -62,6 +62,13 @@ Run main.py:
 python main.py
 ```
 
+or 
+
+```bash
+nohup python main.py > logs.txt 2>&1 &
+```
+
+to run in background and redirect output to a txt file
 This will:
 
 * Receive requests
@@ -94,7 +101,7 @@ Contains:
 logs_x.txt
 ```
 
-will contain the logs for the training
+will contain the logs for the training if run through nohup
 
 ### Plots
 
