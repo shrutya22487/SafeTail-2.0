@@ -448,7 +448,7 @@ SafeTail is designed for **latency-sensitive edge workloads**, including:
 
 * [**Shrutya Chawla**](https://github.com/shrutya22487/)
 * [**Shamik Sinha**](https://github.com/theshamiksinha)
-* [**Shivankar Singh**](https://github.com/BingoBoy479)
+* [**Shivankar Srijan Singh**](https://github.com/BingoBoy479)
 * [**Jyoti Shokhanda**](https://github.com/Jyotishokhanda)
 * [**Arani Bhattacharya**](https://github.com/arani89)
 
