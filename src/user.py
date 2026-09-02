@@ -88,6 +88,12 @@ class Request:
         # the 192-distinct-values `request_type` column in latency_log.csv.
         self.combination = combination
         self.contention_str = ""
+        # [SAFETAIL][FIX][D-18] per-server phase-2 estimate cache; the scheduling
+        # path reuses these instead of drawing fresh propagation/transmission.
+        self._est_by_server: Dict[int, Any] = {}
+        # [SAFETAIL][FIX][D-23] accumulated D-21 saturation-retry backoff (s);
+        # this is the ONLY genuine queue wait in an M/M/c/c loss system.
+        self._saturation_wait_s = 0.0
         self.deadline = np.asarray([], dtype=float)
         self.arrival_time = time.time() * 1000.0
         self.queue_waiting_time = 0.0

@@ -106,13 +106,22 @@ def request_factory(i: int):
             combination = "s"
             deadline = deadlines[0]
 
+        # [SAFETAIL][MAIN][FIX][D-34] real per-request payload-size variation by
+        # type (was the literal 1024 for every request, so transmission delay --
+        # ~45% of the reported metric -- carried no policy-relevant signal).
+        try:
+            lo, hi = constants.MESSAGE_SIZE_KB_BY_TYPE.get(combination, (512, 1536))
+            message_size = int(random.randint(lo, hi))
+        except Exception:
+            message_size = 1024
+
         # ---------------- construct request ----------------
         req = user.Request(
             request_id=int(i),
             process_id=int(i),
             combination=combination,
-            message_size=1024,
-            bandwidth=20,
+            message_size=message_size,
+            bandwidth=constants.DEFAULT_BANDWIDTH_MBPS,
             load=np.zeros(server_count, dtype=int),
             deadline=deadline
         )
@@ -164,30 +173,32 @@ def request_factory(i: int):
                 return None
 
 
-def run_smoke(seed: int | None, log_folder: str = "tools/out/smoke_logs"):
+def run_direct(seed: int | None, n_chunks: int, n_episodes: int,
+               log_folder: str = "tools/out/smoke_logs", label: str = "run"):
     """
-    [SAFETAIL][MAIN][smoke] Short, socket-free, (mostly) deterministic run.
+    [SAFETAIL][MAIN][RUN] Socket-free, seeded, in-process run.
 
-    plan.md 9.4: ~20 episodes, ~300 requests, no plots. Bypasses the TCP
-    sender/receiver entirely -- chunks are generated in-process and handed
-    straight to Controller.send_to_server(), which removes thread/socket
-    nondeterminism and lets gates G2/G3/G4 exercise the real training path fast.
+    Bypasses the TCP sender/receiver entirely -- chunks are generated here and
+    handed straight to Controller.send_to_server(). That removes thread/socket
+    nondeterminism AND the ~500 s of inter-burst sleeps a full socket run spends,
+    so a 15k-request run finishes in minutes instead of half an hour.
+
+    `--smoke` (plan.md 9.4) is this with small numbers: ~20 episodes / ~300
+    requests / no plots, used by gates G2/G3/G4.
     """
     seed_rep = seed_everything(seed)
-    print(f"[SAFETAIL][MAIN][smoke] seeding -> {seed_rep}")
+    print(f"[SAFETAIL][MAIN][{label}] seeding -> {seed_rep}")
 
-    # throwaway log dir so a smoke run never clobbers a real training_logs_* dir
     constants.training_log_folder = log_folder
     constants.original_training_log_folder = log_folder
     Path(log_folder).mkdir(parents=True, exist_ok=True)
 
     controller = Controller(num_servers=constants.beta)
-    controller.expected_episodes = constants.SMOKE_EPISODES
-    controller.plot_every_n_episodes = 10 ** 12  # belt-and-braces; generate_plots also early-returns in SMOKE
+    controller.expected_episodes = n_episodes
+    controller.plot_every_n_episodes = 10 ** 12  # we make our own figures (tools/make_figures.py)
 
-    n_chunks = constants.SMOKE_CHUNKS
-    print(f"[SAFETAIL][MAIN][smoke] feeding {n_chunks} chunks "
-          f"({n_chunks * constants.chunk_size} requests), target {constants.SMOKE_EPISODES} episodes")
+    print(f"[SAFETAIL][MAIN][{label}] feeding {n_chunks} chunks "
+          f"({n_chunks * constants.chunk_size} requests), target {n_episodes} episodes -> {log_folder}")
 
     rid = 0
     t0 = time.time()
@@ -201,17 +212,36 @@ def run_smoke(seed: int | None, log_folder: str = "tools/out/smoke_logs"):
         controller.send_to_server(chunk)
         if controller.training_done.is_set():
             break
+        if c and c % 200 == 0:
+            el = time.time() - t0
+            print(f"[SAFETAIL][MAIN][{label}] chunk {c}/{n_chunks} "
+                  f"ep {controller.current_episode} | {el:.0f}s elapsed, "
+                  f"ETA {el / c * (n_chunks - c):.0f}s", flush=True)
 
     dt = time.time() - t0
-    print(f"[SAFETAIL][MAIN][smoke] done: {controller.current_episode} episodes, "
-          f"{controller.current_step} steps in final episode, {dt:.1f}s wall")
+    print(f"[SAFETAIL][MAIN][{label}] done: {controller.current_episode} episodes, "
+          f"{rid} requests, {dt:.1f}s wall, dropped={controller.dropped_requests}")
     return controller
+
+
+def run_smoke(seed: int | None, log_folder: str = "tools/out/smoke_logs"):
+    """plan.md 9.4 smoke: run_direct at smoke scale."""
+    return run_direct(seed, constants.SMOKE_CHUNKS, constants.SMOKE_EPISODES,
+                      log_folder=log_folder, label="smoke")
 
 
 def main():
     parser = argparse.ArgumentParser(description="SafeTail 2.0 (heterogeneous) runner")
     parser.add_argument("--smoke", action="store_true",
                         help="short deterministic socket-free run (plan.md 9.4)")
+    parser.add_argument("--run", action="store_true",
+                        help="full socket-free run; size it with --chunks/--episodes")
+    parser.add_argument("--chunks", type=int, default=3045,
+                        help="chunks to feed (chunk_size=5) -- 3045 => 15,225 requests, matching reference_v0")
+    parser.add_argument("--episodes", type=int, default=1015,
+                        help="episode budget (chunks_per_episode=3)")
+    parser.add_argument("--out", type=str, default=None, help="log folder for this run")
+    parser.add_argument("--label", type=str, default="run", help="label used in progress lines")
     parser.add_argument("--seed", type=int, default=None,
                         help="master seed (overrides SAFETAIL_SEED / constants.SEED)")
     args, _ = parser.parse_known_args()
@@ -219,9 +249,12 @@ def main():
     smoke = args.smoke or constants.SMOKE
     seed = args.seed if args.seed is not None else constants.SEED
 
+    if args.run:
+        return run_direct(seed, args.chunks, args.episodes,
+                          log_folder=args.out or f"results/{args.label}", label=args.label)
+
     if smoke:
-        run_smoke(seed)
-        return
+        return run_smoke(seed, log_folder=args.out or "tools/out/smoke_logs")
 
     if seed is not None:
         print(f"[SAFETAIL][MAIN] seeding -> {seed_everything(seed)}")

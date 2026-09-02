@@ -71,8 +71,34 @@ class Server:
     def _get_propogation_delay(self):
         return random.choice(self.propagation_delays[self.server_index - 1])
 
+    def _get_transmission_delay(self, message_size_kb=None, bandwidth_mbps=None):
+        """
+        [SAFETAIL][SERVER][FIX][D-12][D-34] Transmission delay as a function of
+        payload size and link bandwidth, not the old
+        `random.choice([18.5,19.2,20,21.5,22])/1000` (5 fixed values, independent
+        of server, message_size and bandwidth -- ~45% of the reported metric was
+        this coin flip).
+
+        Model (SafeTail 1.0 / ST IV): t = 8*KB/up_kbps + 8*KB/dn_kbps, up = dn =
+        bandwidth, plus a small per-server multiplicative link jitter.
+        """
+        if getattr(constants, "LEGACY_TRANSMISSION", False):
+            # [SAFETAIL][LEGACY][D-12][D-34] the pre-fix 5-value coin flip,
+            # independent of server / payload size / bandwidth.
+            return random.choice([18.5, 19.2, 20, 21.5, 22]) / 1000
+
+        ms = float(message_size_kb) if message_size_kb else float(constants.DEFAULT_MESSAGE_SIZE_KB)
+        bw = float(bandwidth_mbps) if bandwidth_mbps and float(bandwidth_mbps) > 0 \
+            else float(constants.DEFAULT_BANDWIDTH_MBPS)
+        bits_kb = 8.0 * ms
+        link_kbps = bw * 1000.0
+        base = bits_kb / link_kbps + bits_kb / link_kbps          # uplink + downlink, seconds
+        j = random.uniform(-constants.LINK_JITTER_FRAC, constants.LINK_JITTER_FRAC)
+        return max(1e-6, base * (1.0 + j))
+
+    # back-compat alias (old misspelled name, no args)
     def _get_tramission_delay(self):
-        return random.choice([18.5, 19.2, 20, 21.5, 22]) / 1000
+        return self._get_transmission_delay()
 
     def _collect_visible_types(self):
         sorted_active = sorted(self.active_requests, key=lambda ar: ar['start_time'])
@@ -154,18 +180,37 @@ class Server:
         return first_letter, combined_string
 
     # ---------- Public API ----------
-    def compute_request_time(self, request: user.Request) -> tuple[
+    def compute_request_time(self, request: user.Request, reuse: bool = False) -> tuple[
         Union[float, Any], str, float, Union[float, Any], Union[float, Any]]:
         """
-        Compute and return total delay for `request` WITHOUT scheduling it.
-        Transmission uses FIXED_BANDWIDTH_KBPS when request does not provide load/bandwidth.
+        Compute total delay for `request` WITHOUT scheduling it.
+
+        [SAFETAIL][SERVER][FIX][D-18] `reuse=True` returns the estimate this
+        server already produced for this request during phase 2, instead of
+        drawing FRESH propagation / transmission samples. Previously phase 2
+        (what the policy sees) and phase 7 (schedule_request, what it is graded
+        on) each drew their own samples, so the agent was scored on numbers it
+        never saw. The controller calls this with reuse=False in phase 2 and the
+        scheduling path calls it with reuse=True.
         """
+        cache = getattr(request, "_est_by_server", None)
+        if cache is None:
+            cache = request._est_by_server = {}
+        if getattr(constants, "LEGACY_DOUBLE_DRAW", False):
+            reuse = False  # [SAFETAIL][LEGACY][D-18] pre-fix: phase 2 and phase 7 each draw
+        if reuse and self.server_index in cache:
+            c = cache[self.server_index]
+            return (c["total"], c["combined_str"], c["comp"], c["prop"], c["trans"])
+
         # 1) propagation
         propagation_delay_for_node = self._get_propogation_delay()
 
-        # 2) transmission (use fixed bandwidth; request may not have load or bandwidth)
+        # 2) transmission -- now f(payload size, link bandwidth)  (D-12, D-34)
         try:
-            transmission_delay_for_node = self._get_tramission_delay()
+            transmission_delay_for_node = self._get_transmission_delay(
+                message_size_kb=getattr(request, "message_size", None),
+                bandwidth_mbps=getattr(request, "bandwidth", None),
+            )
         except Exception as e:
             print(f"[SERVER]    [ERROR] Unexpected error in transmission delay calculation: {e}")
             transmission_delay_for_node = float('inf')
@@ -174,12 +219,14 @@ class Server:
         first_letter, combined_str = self._choose_first_letter_for_regressor(request)
         computation_delay_for_node = self._predict_using_letter(first_letter, combined_str)
 
-        # print("propagation_delay_for_node: ", propagation_delay_for_node *1000)
-        # print("transmission_delay_for_node: ", transmission_delay_for_node*1000)
-        # print("computation_delay_for_node: ", computation_delay_for_node*1000)
-        # print("computation_delay_for_node: ", computation_delay_for_node*1000)
-
         total_delay = propagation_delay_for_node + transmission_delay_for_node + computation_delay_for_node
+
+        cache[self.server_index] = {
+            "total": total_delay, "combined_str": combined_str,
+            "comp": computation_delay_for_node,
+            "prop": propagation_delay_for_node,
+            "trans": transmission_delay_for_node,
+        }
         return (
             total_delay,
             combined_str,
@@ -201,14 +248,14 @@ class Server:
              combined_str,
              computation_delay_for_node,
              propagation_delay_for_node,
-             transmission_delay_for_node) = self.compute_request_time(request)
+             transmission_delay_for_node) = self.compute_request_time(request, reuse=True)
             return False, "server full", total_delay, combined_str, computation_delay_for_node, propagation_delay_for_node, transmission_delay_for_node
 
         (total_delay,
          combined_str,
          computation_delay_for_node,
          propagation_delay_for_node,
-         transmission_delay_for_node) = self.compute_request_time(request)
+         transmission_delay_for_node) = self.compute_request_time(request, reuse=True)  # [D-18]
         start_time = current_time
         finish_time = start_time + total_delay
 

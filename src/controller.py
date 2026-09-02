@@ -143,7 +143,7 @@ class Controller:
             f.write("request_id,request_type,access_rate\n")
         header = (
             "request_id,request_type,contention_str,computation_delay,propagation_delay,"
-            "transmission_delay,queueing_delay,total_latency\n"
+            "transmission_delay,queueing_delay,total_latency,message_size_kb,end_to_end_latency\n"
         )
         with open(self.latency_log_path, "w") as f:
             f.write(header)
@@ -192,7 +192,14 @@ class Controller:
                 f"{propagation_delay:.6f},"
                 f"{transmission_delay:.6f},"
                 f"{queueing_delay:.6f},"
-                f"{total_latency:.6f}\n"
+                f"{total_latency:.6f},"
+                # [SAFETAIL][METRIC][FIX][D-11][D-34] payload size (drives
+                # transmission after B5) and END-TO-END latency = service
+                # (== total_latency) + the queue wait the reward penalises.
+                # Plot one deliberately; never plot a quantity the reward
+                # ignores. Decision 13.1(2).
+                f"{float(getattr(request, 'message_size', 0) or 0):.1f},"
+                f"{(float(total_latency) + float(queueing_delay)):.6f}\n"
             )
             with open(self.latency_log_path, "a") as f:
                 f.write(row)
@@ -725,6 +732,13 @@ class Controller:
                 )
                 return
             backoff = min(self.SATURATION_BACKOFF_BASE * (2 ** attempt), self.SATURATION_BACKOFF_CAP)
+            # [SAFETAIL][CONTROLLER][FIX][D-23] this backoff IS the request's only
+            # genuine wait (Erlang-B loss system, no real queue). Accumulate it as
+            # a simulated quantity; do not rely on wall-clock later.
+            try:
+                request._saturation_wait_s = getattr(request, "_saturation_wait_s", 0.0) + backoff
+            except Exception:
+                pass
             print(f"[SAFETAIL][CONTROLLER][SCHED][D-21] all servers busy, "
                   f"retry {attempt + 1}/{self.SATURATION_MAX_RETRIES} in {backoff:.2f}s")
             time.sleep(backoff)
@@ -875,9 +889,21 @@ class Controller:
             except Exception as e:
                 print(f"[SAFETAIL][REPLAY][D-04] s_t snapshot failed: {type(e).__name__} - {e}")
 
-        # track the waiting time in the queue before request starts processing
+        # [SAFETAIL][CONTROLLER][FIX][D-23] SIMULATED queue wait, not wall-clock.
+        # Was `time.time()*1000 - arrival_time`: CSV lookups + regressor inference
+        # + a TensorFlow forward pass + lock contention, i.e. a function of how
+        # fast the test machine is, and it fed BOTH the reward penalty and T in
+        # P(T). The servers reject when full (M/M/c/c, D-24), so the only genuine
+        # wait is the D-21 saturation backoff this request incurred, plus a small
+        # fixed controller-dispatch cost.
         try:
-            request.queue_waiting_time = time.time() * 1000.0 - request.arrival_time  # in ms
+            if getattr(constants, "LEGACY_QUEUE_WAIT", False):
+                # [SAFETAIL][LEGACY][D-23] pre-fix wall-clock elapsed
+                sim_wait_ms = time.time() * 1000.0 - request.arrival_time
+            else:
+                sim_wait_ms = (getattr(request, "_saturation_wait_s", 0.0) * 1000.0
+                               + float(constants.DISPATCH_COST_MS))
+            request.queue_waiting_time = sim_wait_ms
             self.average_waiting_times.append(request.queue_waiting_time)
         except Exception as e:
             print(f"[CONTROLLER, !] Failed to compute waiting time: {type(e).__name__} - {e}")

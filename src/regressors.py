@@ -64,7 +64,20 @@ _CPU_COLS = {"num_tasks", "peak_cpu", "avg_cpu_clock", "num_files"}
 
 
 def resolve_server(server_index: int) -> int:
-    """Map a logical server index (1-based) to the index whose model/CSV to load."""
+    """
+    Map a logical server index (1-based) to the index whose model/CSV to load.
+
+    [SAFETAIL][LEGACY][D-02] With constants.LEGACY_REGRESSORS, every server
+    resolves to server 1 -- exactly the pre-fix behaviour that produced
+    results/reference_v0/. Used to evaluate a baseline under the same physics as
+    the already-published heterogeneous results.
+    """
+    try:
+        import constants
+        if getattr(constants, "LEGACY_REGRESSORS", False):
+            return 1
+    except Exception:
+        pass
     return SERVER_ALIAS.get(int(server_index), int(server_index))
 
 

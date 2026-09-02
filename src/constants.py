@@ -117,6 +117,57 @@ nS = 1 * beta + 1
 nA = 2 ** beta - 1  # Number of possible actions (subsets of servers).
 post_epsilon_steps = 8000
 
+############################### LEGACY ENVIRONMENT #######################
+# [SAFETAIL][LEGACY] Reproduce the PRE-FIX environment physics, so a policy can
+# be evaluated under exactly the conditions that produced
+# results/reference_v0/ (and the heterogeneous results the mentor already has).
+#
+# SAFETAIL_LEGACY_ENV=1 restores the three fixes that changed the LATENCY MODEL:
+#   D-02  every server predicts computation with models/server1 + server1.csv
+#   D-12/D-34  transmission = random.choice([18.5,19.2,20,21.5,22])/1000,
+#              independent of payload size and bandwidth
+#   D-18  phase 2 and phase 7 each draw their own propagation/transmission
+#   D-23  queue wait = wall-clock elapsed (not the simulated quantity)
+#
+# It deliberately does NOT restore the reward-side fixes (D-04..D-07, D-16,
+# D-20, B3, B4): those change only the SafeTail-2.0 learned policy, never the
+# latency a request experiences, so they cannot affect a baseline comparison.
+LEGACY_ENV = _env_flag("SAFETAIL_LEGACY_ENV")
+
+LEGACY_REGRESSORS = _env_flag("SAFETAIL_LEGACY_REGRESSORS") or LEGACY_ENV   # D-02
+LEGACY_TRANSMISSION = _env_flag("SAFETAIL_LEGACY_TRANSMISSION") or LEGACY_ENV  # D-12/D-34
+LEGACY_DOUBLE_DRAW = _env_flag("SAFETAIL_LEGACY_DOUBLE_DRAW") or LEGACY_ENV  # D-18
+LEGACY_QUEUE_WAIT = _env_flag("SAFETAIL_LEGACY_QUEUE_WAIT") or LEGACY_ENV    # D-23
+
+############################### METRIC SEMANTICS (B5) ####################
+# [SAFETAIL][METRIC][B5] Decisions 13.1(2) and D-11/D-12/D-18/D-23/D-34.
+
+# D-11: which latency the figures plot. "service" = computation+propagation+
+# transmission (the quantity the min-over-subset and the reward effectively
+# optimise). "end_to_end" = service + simulated queue wait. Both are always
+# logged to latency_log.csv; this only selects the headline column.
+LATENCY_METRIC = os.environ.get("SAFETAIL_LATENCY_METRIC", "service").strip() or "service"
+
+# D-12 / D-34: transmission delay is now f(message_size, bandwidth), not a
+# 5-value coin flip. Model (SafeTail 1.0, ST IV): t = 8*KB/up_kbps + 8*KB/dn_kbps
+# with up = dn = bandwidth. Plus a small per-server multiplicative link jitter.
+DEFAULT_MESSAGE_SIZE_KB = 1024      # fallback when a request carries no size
+DEFAULT_BANDWIDTH_MBPS = 20
+LINK_JITTER_FRAC = float(os.environ.get("SAFETAIL_LINK_JITTER", "0.05"))
+
+# D-34: real per-request payload-size variation (KB), by request type. Speech
+# (audio clip) payloads are larger than a single vision frame.
+# Calibrated so transmission stays the same ORDER as the legacy constant (~20 ms
+# at 20 Mbps two-way) while now varying with type and payload:
+#   s 16-64 KB -> 12.8-51 ms | d,p 4-24 KB -> 3.2-19 ms
+MESSAGE_SIZE_KB_BY_TYPE = {"s": (16, 64), "d": (4, 24), "p": (4, 24)}
+
+# D-23: the queue wait fed to P(T) and the episodic penalty is SIMULATED, not
+# wall-clock. The servers are an M/M/c/c loss system (D-24) -- no real queue --
+# so the only genuine wait is the D-21 saturation backoff a request incurred,
+# plus a small fixed controller-dispatch cost (ms).
+DISPATCH_COST_MS = float(os.environ.get("SAFETAIL_DISPATCH_COST_MS", "1.0"))
+
 ############################### TRAINING LOGS ##########################
 
 training_log_folder = os.environ.get("TRAINING_LOG_FOLDER", "training_logs_1")
