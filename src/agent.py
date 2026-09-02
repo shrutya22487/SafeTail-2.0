@@ -268,6 +268,18 @@ class DQNAgent:
         # Store RAW states (NOT encoded!)
         self.memory.append((state_vec, action, reward, next_state_vec))
 
+    def store_arrays(self, state_arr, action, reward, next_state_arr):
+        """
+        [SAFETAIL][REPLAY][FIX][D-04] Store PRE-FLATTENED state arrays captured at
+        action time. `store()` flattens a live Request lazily, which is how the
+        replay state ended up containing the outcome of its own action. The
+        controller now snapshots s_t before scheduling and s_{t+1} after, and
+        hands the arrays straight here.
+        """
+        s = np.asarray(state_arr, dtype=float).reshape(-1, 1)
+        ns = np.asarray(next_state_arr, dtype=float).reshape(-1, 1)
+        self.memory.append((s, action, float(reward), ns))
+
     def get_action(self, request):
         """
         Selects an action (subset of servers) given the current Request.
@@ -361,9 +373,7 @@ class DQNAgent:
         self.rewards = np.append(self.rewards, np.mean(rewards))
 
     def get_min_delay(self, request, servers_to_be_queried):
-        """
-        Query the servers and get the minimum delay among them.
-        """
+        """[SAFETAIL][DEAD][D-29] orphan -- never called; also unpacks compute_request_time wrong."""
         min_delay = float('inf')
         for server in servers_to_be_queried:
             min_delay = min(min_delay, self.server_list[server].compute_request_time(request))

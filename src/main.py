@@ -1,6 +1,8 @@
+import argparse
 import inspect
 import logging
 import random
+import sys
 import time
 import warnings
 from pathlib import Path
@@ -9,8 +11,18 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
+# [SAFETAIL][MAIN][FIX][D-36] Windows consoles default to cp1252; src/ is full of
+# emoji print()s that raise UnicodeEncodeError there. Force UTF-8 on the streams
+# before anything prints. (Real fix -- routing prints through _safetail_log -- is B9.)
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 import constants
 import user
+from _seeding import seed_everything
 from controller import Controller
 from receiver import Receiver
 from sender_bursts import SenderBursts
@@ -152,7 +164,68 @@ def request_factory(i: int):
                 return None
 
 
+def run_smoke(seed: int | None, log_folder: str = "tools/out/smoke_logs"):
+    """
+    [SAFETAIL][MAIN][smoke] Short, socket-free, (mostly) deterministic run.
+
+    plan.md 9.4: ~20 episodes, ~300 requests, no plots. Bypasses the TCP
+    sender/receiver entirely -- chunks are generated in-process and handed
+    straight to Controller.send_to_server(), which removes thread/socket
+    nondeterminism and lets gates G2/G3/G4 exercise the real training path fast.
+    """
+    seed_rep = seed_everything(seed)
+    print(f"[SAFETAIL][MAIN][smoke] seeding -> {seed_rep}")
+
+    # throwaway log dir so a smoke run never clobbers a real training_logs_* dir
+    constants.training_log_folder = log_folder
+    constants.original_training_log_folder = log_folder
+    Path(log_folder).mkdir(parents=True, exist_ok=True)
+
+    controller = Controller(num_servers=constants.beta)
+    controller.expected_episodes = constants.SMOKE_EPISODES
+    controller.plot_every_n_episodes = 10 ** 12  # belt-and-braces; generate_plots also early-returns in SMOKE
+
+    n_chunks = constants.SMOKE_CHUNKS
+    print(f"[SAFETAIL][MAIN][smoke] feeding {n_chunks} chunks "
+          f"({n_chunks * constants.chunk_size} requests), target {constants.SMOKE_EPISODES} episodes")
+
+    rid = 0
+    t0 = time.time()
+    for c in range(n_chunks):
+        reqs = [request_factory(rid + k) for k in range(constants.chunk_size)]
+        rid += constants.chunk_size
+        chunk = np.array([r for r in reqs if r is not None], dtype=object)
+        now_ms = time.time() * 1000.0
+        for r in chunk:
+            r.arrival_time = now_ms
+        controller.send_to_server(chunk)
+        if controller.training_done.is_set():
+            break
+
+    dt = time.time() - t0
+    print(f"[SAFETAIL][MAIN][smoke] done: {controller.current_episode} episodes, "
+          f"{controller.current_step} steps in final episode, {dt:.1f}s wall")
+    return controller
+
+
 def main():
+    parser = argparse.ArgumentParser(description="SafeTail 2.0 (heterogeneous) runner")
+    parser.add_argument("--smoke", action="store_true",
+                        help="short deterministic socket-free run (plan.md 9.4)")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="master seed (overrides SAFETAIL_SEED / constants.SEED)")
+    args, _ = parser.parse_known_args()
+
+    smoke = args.smoke or constants.SMOKE
+    seed = args.seed if args.seed is not None else constants.SEED
+
+    if smoke:
+        run_smoke(seed)
+        return
+
+    if seed is not None:
+        print(f"[SAFETAIL][MAIN] seeding -> {seed_everything(seed)}")
+
     # --------------- setup controller ---------------
     controller = Controller(num_servers=constants.beta)  # Change number of servers accordingly
     # ---------------- setup receiver ----------------
