@@ -27,6 +27,19 @@ class Receiver:
             persist_chunks: bool = True,
             controller=None,
     ):
+        # [SAFETAIL][RECEIVER][FIX][D-31] The wire payload is pickled Request
+        # objects loaded with np.load(allow_pickle=True) -> arbitrary code
+        # execution if this port is ever reachable off-host. Hard-refuse any
+        # non-loopback bind, and cap the payload size, so the unpickle can only
+        # ever process data this machine sent to itself.
+        if host not in ("127.0.0.1", "::1", "localhost"):
+            raise ValueError(
+                f"[SAFETAIL][RECEIVER][D-31] refusing to bind {host!r}: the receiver "
+                f"unpickles its payloads and must stay loopback-only. Set "
+                f"constants.receiver_host = '127.0.0.1'."
+            )
+        self.MAX_PAYLOAD_BYTES = 8 * 1024 * 1024  # 8 MiB: a chunk of 5 Requests is ~few KB
+
         self.host = host
         self.port = port
         self.tcp_backlog = tcp_backlog
@@ -149,6 +162,12 @@ class Receiver:
 
                     if length <= 0:
                         print(f"[RECEIVER, !] Invalid payload length {length} from {addr}")
+                        break
+
+                    if length > self.MAX_PAYLOAD_BYTES:
+                        # [SAFETAIL][RECEIVER][D-31] refuse oversized payloads
+                        print(f"[SAFETAIL][RECEIVER][D-31] payload {length} B from {addr} "
+                              f"exceeds cap {self.MAX_PAYLOAD_BYTES} B; dropping connection")
                         break
 
                     # ---- Receive payload ----

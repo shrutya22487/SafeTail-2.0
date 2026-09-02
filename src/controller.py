@@ -1,3 +1,4 @@
+import os
 import threading
 import time
 from pathlib import Path
@@ -8,7 +9,17 @@ from tensorflow.keras.models import load_model
 
 import constants
 import servers
-from agent import DQNAgent
+from agent import DQNAgent, request_to_state_array
+from policy_registry import PolicyContext, subset_to_index  # [SAFETAIL][SEAM] stdlib-only, always present
+
+MAX_CONCURRENT_REQUESTS = servers.MAX_CONCURRENT_REQUESTS
+
+# [SAFETAIL][REPLAY][AUDIT][D-04] When SAFETAIL_AUDIT_REPLAY=1, every stored
+# transition is also appended here with the realised per-server delays of the
+# same step, so tools/audit_replay.py (gate G2) can assert the state carries no
+# outcome. Off by default -- zero cost in normal runs.
+AUDIT_TRANSITIONS: list = []
+_AUDIT_REPLAY = os.environ.get("SAFETAIL_AUDIT_REPLAY", "0") not in ("0", "", "false")
 
 
 class Controller:
@@ -49,6 +60,9 @@ class Controller:
         self.request_d_total = 0
         self.request_p_done = 0
         self.request_p_total = 0
+
+        # [SAFETAIL][CONTROLLER][D-21] requests dropped after saturation retries
+        self.dropped_requests = 0
 
         # ---------------- Plotting Configuration ----------------
         self.plot_every_n_episodes = 20  # Generate plots every N episodes
@@ -97,6 +111,17 @@ class Controller:
         #          | "rand_1" | "rand_2" | "rand_3"
         self.BASELINE_MODE = constants.BASELINE_MODE
         # ─────────────────────────────────────────────────────────────────────
+
+        # [SAFETAIL][SEAM][M-02] Optional external policy (plan.md 8.3).
+        # With baselines/ absent, constants.POLICY stays "native" and this is None;
+        # the DQN / heuristic paths below are unconditional and survive deletion.
+        self.policy = None
+        self._pending_policy_ctx = None
+        _pol = getattr(constants, "POLICY", "native")
+        if _pol not in (None, "", "native"):
+            from policy_registry import get  # stdlib-only module, always importable
+            self.policy = get(_pol)()         # KeyError here is a loud, correct failure
+            print(f"[SAFETAIL][SEAM] external policy active: {_pol} -> {type(self.policy).__name__}")
         base_log_dir = Path(constants.training_log_folder)
         base_log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -117,7 +142,7 @@ class Controller:
         with open(self.request_access_log_path, "w") as f:
             f.write("request_id,request_type,access_rate\n")
         header = (
-            "request_id,request_type,computation_delay,propagation_delay,"
+            "request_id,request_type,contention_str,computation_delay,propagation_delay,"
             "transmission_delay,queueing_delay,total_latency\n"
         )
         with open(self.latency_log_path, "w") as f:
@@ -154,10 +179,15 @@ class Controller:
 
         try:
             request_id = getattr(request, "request_id", "unknown")
-            request_type = getattr(request, "combination", "?")
+            # [SAFETAIL][FIX][D-19] log the immutable type letter, never the
+            # contention string. `combination` is no longer mutated (D-19), but
+            # slice defensively so this column can only ever be s|d|p|?.
+            request_type = str(getattr(request, "combination", "?"))[:1] or "?"
+            contention = str(getattr(request, "contention_str", "") or "")
             row = (
                 f"{request_id},"
                 f"{request_type},"
+                f"{contention},"
                 f"{computation_delay:.6f},"
                 f"{propagation_delay:.6f},"
                 f"{transmission_delay:.6f},"
@@ -229,6 +259,80 @@ class Controller:
         load = [s.check_server_availability(now) for s in self.server_list]
         return np.array(load)
 
+    def _build_policy_context(self, request, load, other_latencies):
+        """
+        [SAFETAIL][SEAM] Assemble the frozen, pre-action PolicyContext (plan.md 8.4).
+
+        `load[i]` is check_server_availability(): current active-request count when
+        the server has room, else -1 (full). free_slots is derived from it.
+        Per-server estimates come from the SINGLE phase-2 draw already stored on
+        `request.total_processing_delay` / `other_latencies` (guards against the
+        D-18 double-draw for policies that use the seam).
+        """
+        beta = self.num_servers
+        load = list(load)
+        free_slots = [(-1 if l == -1 else int(MAX_CONCURRENT_REQUESTS - l)) for l in load]
+
+        est_delay = []
+        est_components = []
+        tpd = getattr(request, "total_processing_delay", None)
+        for i in range(beta):
+            comp = prop = trans = 0.0
+            if i < len(other_latencies) and other_latencies[i]:
+                comp = float(other_latencies[i].get("computation", 0.0))
+                prop = float(other_latencies[i].get("propagation", 0.0))
+                trans = float(other_latencies[i].get("transmission", 0.0))
+            est_components.append((comp, prop, trans))
+            if tpd is not None and i < len(tpd):
+                est_delay.append(float(tpd[i]))
+            else:
+                est_delay.append(comp + prop + trans)
+
+        static, dynamic = [], []
+        for i, srv in enumerate(self.server_list):
+            d = request.server_dicts[i] if i < len(request.server_dicts) else {}
+            static.append({
+                "total_ram": d.get("total_ram", 0.0),
+                "total_cpu_cores": d.get("total_cpu_cores", 0),
+                "total_gpu_memory": d.get("total_gpu_memory", 0.0),
+                "has_gpu": bool(d.get("total_gpu_memory", 0.0)),
+            })
+            dynamic.append({
+                "active_requests": int(getattr(srv, "num_requests", 0)),
+                "ram_usage": d.get("ram_usage", 0.0),
+                "gpu_usage": d.get("gpu_usage", 0),
+            })
+
+        rtype = "?"
+        try:
+            rtype = str(request.combination)[0]
+        except Exception:
+            pass
+        try:
+            if str(request.combination)[0] == "s":
+                deadline = tuple(self.deadlines[0])
+            else:
+                deadline = tuple(self.deadlines[1])
+        except Exception:
+            deadline = (float("nan"), float("nan"))
+
+        return PolicyContext(
+            request_id=int(getattr(request, "request_id", -1)),
+            request_type=rtype,
+            deadline=(float(deadline[0]), float(deadline[1])),
+            message_size=float(getattr(request, "message_size", 0.0)),
+            bandwidth=float(getattr(request, "bandwidth", 0.0)),
+            beta=beta,
+            free_slots=free_slots,
+            est_delay=est_delay,
+            est_components=est_components,
+            server_static=static,
+            server_dynamic=dynamic,
+            arrival_time=float(getattr(request, "arrival_time", 0.0)),
+            episode_index=int(self.current_episode),
+            step_index=int(self.current_step),
+        )
+
     # ── Baseline server selection helpers ────────────────────────────────────
 
     def _select_minload_servers(self, x):
@@ -252,32 +356,17 @@ class Controller:
     # ─────────────────────────────────────────────────────────────────────────
 
     def get_queue_lengths(self):
-        """Get current queue length for each server."""
+        # [SAFETAIL][DEAD][D-29] orphan -- never called. Also misnamed: there are
+        # no queues (D-24); this returns active-request counts. Kept as a
+        # read-only accessor for tooling.
         return np.array([len(s.active_requests) for s in self.server_list])
 
-    def dispatch_to_agent(self, request):
-        return self.agent.get_action(request)
-
-    def assign_request(self, request, indices):
-
-        print(f"[CONTROLLER, ASSIGN] Assigning Request {request.request_id} to servers: {indices}")
-
-        for i in indices:
-            try:
-                ok, finish, proc = self.server_list[i].schedule_request(request)
-
-                if ok:
-                    print(f"[CONTROLLER, ASSIGN] Req {request.request_id} → Server {i + 1} ({proc:.3f}s)")
-                else:
-                    print(f"[CONTROLLER, BUSY] Server {i + 1} full for Req {request.request_id}")
-
-            except (IndexError, TypeError) as e:
-                print(f"[CONTROLLER, ERROR:1] {e}")
-                break
-            except Exception as e:
-                print(f"[CONTROLLER, ERROR:2] Unexpected error for Req {request.request_id} on server {i}: {e}")
-
-        print("\n---- ---- ---- \n")
+    # [SAFETAIL][FIX][D-28] `assign_request(request, indices)` DELETED here.
+    # It unpacked 3 values from schedule_request's 7-tuple (`ok, finish, proc =
+    # ...`) and would raise on any call. It was unreachable dead code, and a
+    # broken orphan invites someone to "fix" it into the live path. The live
+    # scheduling loop is in process_step(). `dispatch_to_agent` (a one-line
+    # wrapper around agent.get_action) is removed with it -- also unused.
 
     # ------------------------------------------------------------
     # Reward
@@ -286,17 +375,31 @@ class Controller:
         """
         Step reward computed PER REQUEST (per server).
 
-        Reward:
-        R = 1 + log( exp((1 - cm)(1 - cu)(1 - gm)(1 - gu) - 1 ))
+        Implemented formula (see S-03 -- this is the ONE authoritative statement):
 
-        Where:
-        cm = RAM utilization = RAM_used / Total_RAM_available
-        cu = CPU core utilization = (sum of CPU core percentages/100) / Number_of_cores
-        gm = GPU memory utilization = peak GPU_memory / Total_GPU_memory_available
-        gu = GPU core utilization = GPU_core_utilization
+            headroom_i = geometric_mean( available (1 - u) factors )
+            R_i        = log(1 + headroom_i)            in [0, log 2]
 
-        If action_subset is None → compute for all servers
-        Otherwise → compute only for servers in action_subset
+        Utilisation factors u:
+            cm = ram_usage / total_ram
+            cu = (sum cpu_core_% / 100) / total_cpu_cores
+            gm = gpu_memory / total_gpu_memory      } only when the server HAS a GPU
+            gu = gpu_usage / 100                    }   (D-16)
+
+        [SAFETAIL][REWARD][FIX][D-16] CPU-only servers (no GPU columns in their
+        dataset CSV -- servers 3 and 4) previously got (1-0)*(1-0)=1 for the two
+        GPU factors, structurally inflating their headroom. Now the GPU factors
+        are DROPPED for such servers and the product is renormalised via a
+        geometric mean so a 2-factor and a 4-factor server are on one scale.
+
+        [SAFETAIL][REWARD][FIX][D-27] docstring now states the formula that is
+        actually computed (was: "1 + log(exp(...)-1)").
+
+        NOTE: this reward is still monotone non-decreasing in |A| once the
+        controller collapses it with a mean -- pricing redundancy is D-07/M-04,
+        fixed in B3, not here.
+
+        If action_subset is None -> compute for all servers, else only those.
         """
 
         num_servers = len(request.server_dicts)
@@ -362,19 +465,23 @@ class Controller:
 
                 #######################################################################################################
 
-                # Track request completion counts for different combination types (for use in episodic reward shaping)
-                if (combination == "s"):
+                # [SAFETAIL][REWARD][FIX][D-20] completion counts are DEADLINE-
+                # CONDITIONAL again. Previously *_total was set here but *_done was
+                # incremented unconditionally in send_to_server(), so the
+                # completion ratio in the episodic wait-time denominator was
+                # identically 1.0 by construction. `_done` is now gated on T<=D2
+                # here, at the one place T is known, and the unconditional
+                # increments in send_to_server() are removed.
+                _met_deadline = (T <= D2)
+                if combination == "s":
                     self.request_s_total += 1
-                    # if T <= D2:
-                    #     self.request_s_done += 1
-                elif (combination == "d"):
+                    self.request_s_done += int(_met_deadline)
+                elif combination == "d":
                     self.request_d_total += 1
-                    # if T <= D2:
-                    #     self.request_d_done += 1
-                elif (combination == "p"):
+                    self.request_d_done += int(_met_deadline)
+                elif combination == "p":
                     self.request_p_total += 1
-                    # if T <= D2:
-                    #     self.request_p_done += 1
+                    self.request_p_done += int(_met_deadline)
 
                 #######################################################################################################
 
@@ -414,44 +521,99 @@ class Controller:
 
                 total_ram_mb = float(d["total_ram"]) * GB_TO_MB
                 cm = d["ram_usage"] / max(total_ram_mb, 1e-8)
-                # print(f"RAM Usage: {d['ram_usage']}, Total RAM: {d['total_ram']}, CM: {cm}")
 
                 cpu_cores_utilised = np.sum(d["cpu_usage"]) / 100.0
-                cu = cpu_cores_utilised / (float(d["total_cpu_cores"]))
-                # print(f"CPU Usage: {cpu_cores_utilised}, Total CPU Cores: {d['total_cpu_cores']}, CU: {cu}")
+                cu = cpu_cores_utilised / max(float(d["total_cpu_cores"]), 1e-8)
 
-                total_gpu_mem_mb = float(d["total_gpu_memory"]) * GB_TO_MB
-                gm = d["gpu_memory"] / max(total_gpu_mem_mb, 1e-8)
-                # print(f"GPU Memory Usage: {d['gpu_memory']}, Total GPU Memory: {d['total_gpu_memory']}, GM: {gm}")
+                # [SAFETAIL][REWARD][FIX][D-16] GPU factors only for GPU servers.
+                has_gpu = float(d.get("total_gpu_memory", 0.0) or 0.0) > 0.0
+                factors = [1.0 - cm, 1.0 - cu]
+                if has_gpu:
+                    total_gpu_mem_mb = float(d["total_gpu_memory"]) * GB_TO_MB
+                    gm = d["gpu_memory"] / max(total_gpu_mem_mb, 1e-8)
+                    gu = float(d["gpu_usage"]) / 100.0
+                    factors += [1.0 - gm, 1.0 - gu]
 
-                gu = float(d["gpu_usage"]) / 100.0
-                # print(f"GPU Usage: {d['gpu_usage']}, GU: {gu}")
-                # print()
+                # clip each factor into [0,1] (utilisation can momentarily exceed
+                # capacity in the trace) then take the geometric mean so servers
+                # with 2 vs 4 factors are comparable.
+                factors = [min(1.0, max(0.0, f)) for f in factors]
+                headroom = float(np.prod(factors)) ** (1.0 / len(factors))
 
-                # ---- Reward ----
-                product = (1 - cm) * (1 - cu) * (1 - gm) * (1 - gu)
+                # ---- Reward ----  R in [0, log 2]  (S-03)
+                reward = float(np.log1p(headroom))
 
-                reward = np.log(product + 1.0)
-                # print(f"[CONTROLLER]...[STEP REWARD] Server {server_idx}: Reward={reward:.6f}")
-
-                # print()
-                # print()
-
-                # Final sanity check
                 if not np.isfinite(reward):
                     raise ValueError(
-                        f"[CONTROLLER]...[STEP REWARD][ERROR] Non-finite reward computed for server {server_idx}")
+                        f"[CONTROLLER][REWARD][INVARIANT][D-17] non-finite reward for server {server_idx}")
 
                 rewards[i] = reward
 
             except Exception as e:
-                # Fail-safe: zero reward + log
-                rewards[server_idx - 1] = 0.0
+                # [SAFETAIL][REWARD][FIX][D-17] zero THIS server's slot (was
+                # rewards[server_idx-1], which corrupted a neighbour and left
+                # server 0 at its initialised value). server_idx is validated
+                # 0 <= server_idx < num_servers above.
+                rewards[server_idx] = 0.0
                 print(
-                    f"[CONTROLLER]...[STEP REWARD][ERROR] Server {server_idx}: {type(e).__name__} - {e}"
+                    f"[CONTROLLER][REWARD][D-17] step-reward failure on server {server_idx}: "
+                    f"{type(e).__name__} - {e}"
                 )
 
         return rewards
+
+    def _collapse_step_reward(self, per_server_rewards, action_subset):
+        """
+        [SAFETAIL][REWARD][FIX][D-07][M-04][S-02] Collapse the per-server headroom
+        rewards to one scalar AND price redundancy.
+
+            R_step = (1/|A|) * sum_{i in A} log(1 + headroom_i)
+                     - c_red * (|A| - 1) / (beta - 1)
+
+        Two changes vs the old `np.mean(per_server_rewards)`:
+          * the mean is over the SELECTED servers |A|, not a constant 6 (the
+            phantom slot from server_dicts length 6 -- W-02 -- also drops out);
+          * an explicit cost, linear in the redundancy count, subtracts from the
+            reward. c_red = 0 reproduces the old (un-priced) behaviour.
+
+        S-02: this is NOT HED's `Sum(l_i - l_bar) - W_step` term (that was
+        sign-inverted for load balancing). BTP correctly replaced the load term
+        with the headroom product but dropped every |A|-sensitive quantity;
+        `c_red` restores redundancy pricing without the HED sign bug.
+        """
+        idx = [int(i) for i in action_subset] if action_subset is not None else \
+              list(range(len(per_server_rewards)))
+        idx = [i for i in idx if 0 <= i < len(per_server_rewards)]
+        if not idx:
+            return 0.0
+        mean_headroom = float(np.mean([per_server_rewards[i] for i in idx]))
+        k = len(idx)
+        beta = max(2, self.num_servers)
+        c_red = float(getattr(constants, "C_RED", 0.0))
+        penalty = c_red * (k - 1) / (beta - 1)
+        return mean_headroom - penalty
+
+    def _apply_tau_term(self, headroom_reward, request, action_subset, observed_latency_ms, mode):
+        """
+        [SAFETAIL][REWARD][FIX][B4][M-03] Fold the SafeTail 1.0 tau-referenced
+        5-case reward into the step reward.
+
+        `observed_latency_ms` is min realised latency over A, in ms; tau (per
+        request type, from constants.TAU_BY_TYPE) is in seconds.
+        """
+        try:
+            from rewards import tau_reward_5case
+            letter = str(getattr(request, "combination", "d"))[:1]
+            tau = constants.TAU_BY_TYPE.get(letter, constants.TAU_BY_TYPE.get("d", 0.05))
+            obs_s = float(observed_latency_ms) / 1000.0
+            r_tau, oob = tau_reward_5case(
+                obs_s, tau, len(action_subset), self.num_servers, float(constants.alpha))
+            if oob:
+                self._tau_out_of_band = getattr(self, "_tau_out_of_band", 0) + 1
+            return r_tau if mode == "tau" else (headroom_reward + r_tau)
+        except Exception as e:
+            print(f"[SAFETAIL][REWARD][B4] tau term failed: {type(e).__name__} - {e}")
+            return headroom_reward
 
     def compute_episodic_reward(self):
         """
@@ -529,6 +691,13 @@ class Controller:
 
         return episodic_reward
 
+    # [SAFETAIL][CONTROLLER][FIX][D-21] saturation retry: bounded, exp backoff,
+    # explicit drop + counter. Was unbounded recursion (stack overflow under
+    # sustained saturation).
+    SATURATION_MAX_RETRIES = 6
+    SATURATION_BACKOFF_BASE = 0.05   # s; 0.05, 0.1, 0.2, ... capped
+    SATURATION_BACKOFF_CAP = 0.8
+
     def process_step(self, request):
 
         try:
@@ -536,18 +705,29 @@ class Controller:
         except Exception:
             print(f"\n[CONTROLLER, STEP {self.current_step}] Processing request <unknown>.")
 
-        try:
-            load = self.find_free_servers()
-            num_free = sum(l != -1 for l in load)
-        except Exception as e:
-            print(f"[CONTROLLER, !] Failed to find free servers: {type(e).__name__} - {e}")
-            return
-
-        if num_free == 0:
-            print("[CONTROLLER, QUEUE] All servers busy. Retrying shortly.")
-            time.sleep(0.1)
-            self.process_step(request)
-            return
+        num_free = 0
+        load = None
+        for attempt in range(self.SATURATION_MAX_RETRIES + 1):
+            try:
+                load = self.find_free_servers()
+                num_free = sum(l != -1 for l in load)
+            except Exception as e:
+                print(f"[CONTROLLER, !] Failed to find free servers: {type(e).__name__} - {e}")
+                return
+            if num_free > 0:
+                break
+            if attempt == self.SATURATION_MAX_RETRIES:
+                self.dropped_requests += 1
+                print(
+                    f"[SAFETAIL][CONTROLLER][SCHED][D-21] all servers saturated after "
+                    f"{self.SATURATION_MAX_RETRIES} retries; DROPPING request "
+                    f"{getattr(request, 'request_id', '?')} (total dropped={self.dropped_requests})"
+                )
+                return
+            backoff = min(self.SATURATION_BACKOFF_BASE * (2 ** attempt), self.SATURATION_BACKOFF_CAP)
+            print(f"[SAFETAIL][CONTROLLER][SCHED][D-21] all servers busy, "
+                  f"retry {attempt + 1}/{self.SATURATION_MAX_RETRIES} in {backoff:.2f}s")
+            time.sleep(backoff)
 
         try:
             request.load = np.array(load)
@@ -605,9 +785,50 @@ class Controller:
 
         # ── Server selection: driven automatically by self.BASELINE_MODE ────────
         try:
-            if self.BASELINE_MODE == "safetail":
+            if self.policy is not None:
+                # [SAFETAIL][SEAM][M-02] External policy path. Native branches below
+                # are untouched and remain the only path when baselines/ is absent.
+                ctx = self._build_policy_context(request, load, other_latencies)
+                self._pending_policy_ctx = ctx
+                subset = [int(i) for i in self.policy.select(ctx)]
+                if not subset or not all(0 <= i < self.num_servers for i in subset):
+                    raise ValueError(
+                        f"[SAFETAIL][SEAM][INVARIANT] policy {self.policy.name!r} returned "
+                        f"invalid subset {subset} for beta={self.num_servers}"
+                    )
+                action_subset = subset
+                action_index = subset_to_index(subset, self.num_servers)
+                try:
+                    self.log_request_access_rate_with_type(
+                        request_id=request.request_id,
+                        request_type=str(request.combination),
+                        access_rate=len(action_subset) / self.num_servers,
+                    )
+                except Exception as e:
+                    print(f"[CONTROLLER] Access rate logging failed: {e}")
+
+            elif self.BASELINE_MODE == "safetail":
                 original_request_type = request.combination
                 action_subset, action_index = self.agent.get_action(request)
+                # [SAFETAIL][CONTROLLER][FIX][B6][D-09] --match-k: cap SafeTail's
+                # subset to a target mean K so the headline comparison is
+                # replication-budget controlled. Keeps the K servers with the
+                # lowest phase-2 estimate; alternates floor/ceil(MATCH_K) so the
+                # realised mean lands on the fractional target.
+                mk = getattr(constants, "MATCH_K", None)
+                if mk:
+                    self._mk_steps = getattr(self, "_mk_steps", 0) + 1
+                    self._mk_selected = getattr(self, "_mk_selected", 0)
+                    # target keeps the running mean pinned to mk
+                    target = int(round(float(mk) * self._mk_steps - self._mk_selected))
+                    target = max(1, min(target, len(action_subset)))
+                    if len(action_subset) > target:
+                        tpd = getattr(request, "total_processing_delay", None)
+                        order = sorted(action_subset,
+                                       key=lambda i: (tpd[i] if tpd is not None and i < len(tpd) else 0.0))
+                        action_subset = sorted(order[:target])
+                        action_index = subset_to_index(action_subset, self.num_servers)
+                    self._mk_selected += len(action_subset)
                 # -------- ACCESS RATE PER REQUEST --------
                 try:
                     access_rate = len(action_subset) / self.num_servers
@@ -619,30 +840,40 @@ class Controller:
                 except Exception as e:
                     print(f"[CONTROLLER] Access rate logging failed: {e}")
 
-            elif self.BASELINE_MODE == "minload_1":
-                action_subset, action_index = self._select_minload_servers(1), 0
-            elif self.BASELINE_MODE == "minload_2":
-                action_subset, action_index = self._select_minload_servers(2), 0
-            elif self.BASELINE_MODE == "minload_3":
-                action_subset, action_index = self._select_minload_servers(3), 0
-            elif self.BASELINE_MODE == "minprop_1":
-                action_subset, action_index = self._select_minprop_servers(1), 0
-            elif self.BASELINE_MODE == "minprop_2":
-                action_subset, action_index = self._select_minprop_servers(2), 0
-            elif self.BASELINE_MODE == "minprop_3":
-                action_subset, action_index = self._select_minprop_servers(3), 0
-            elif self.BASELINE_MODE == "rand_1":
-                action_subset, action_index = self._select_rand_servers(1), 0
-            elif self.BASELINE_MODE == "rand_2":
-                action_subset, action_index = self._select_rand_servers(2), 0
-            elif self.BASELINE_MODE == "rand_3":
-                action_subset, action_index = self._select_rand_servers(3), 0
             else:
-                raise ValueError(f"Unknown BASELINE_MODE: '{self.BASELINE_MODE}'")
+                # [SAFETAIL][CONTROLLER][FIX][B6][D-09] generic {family}_{K}
+                # dispatch. K now ranges 1..beta (was hardcoded 1..3), so the
+                # baseline comparison can be run budget-matched to SafeTail's
+                # mean K instead of capped below it.
+                fam, _, k_str = self.BASELINE_MODE.partition("_")
+                selectors = {
+                    "minload": self._select_minload_servers,
+                    "minprop": self._select_minprop_servers,
+                    "rand": self._select_rand_servers,
+                }
+                if fam not in selectors or not k_str.isdigit():
+                    raise ValueError(f"Unknown BASELINE_MODE: '{self.BASELINE_MODE}'")
+                k = max(1, min(int(k_str), self.num_servers))
+                action_subset = list(selectors[fam](k))
+                action_index = subset_to_index(action_subset, self.num_servers) if action_subset else 0
         # ─────────────────────────────────────────────────────────────────────
         except Exception as e:
             print(f"[CONTROLLER, !] Agent failed to produce action: {type(e).__name__} - {e}")
             return
+
+        # [SAFETAIL][REPLAY][FIX][D-04] Snapshot the state the agent ACTED ON,
+        # as a flat array, BEFORE schedule_request() mutates the request with
+        # realised delays / contention string / queue_waiting_time. The old code
+        # stored the live Request object and only flattened it in
+        # finalize_episode(), by which time it held the OUTCOME of its own action.
+        s_t_arr = None
+        _learning = (self.BASELINE_MODE == "safetail" and self.policy is None
+                     and not self.testing_phase_active)
+        if _learning:
+            try:
+                s_t_arr = request_to_state_array(request, self.agent.remove_nan_in_state)
+            except Exception as e:
+                print(f"[SAFETAIL][REPLAY][D-04] s_t snapshot failed: {type(e).__name__} - {e}")
 
         # track the waiting time in the queue before request starts processing
         try:
@@ -673,7 +904,8 @@ class Controller:
         # compute reward and track latency metrics
         try:
             final_step_reward_list = self.compute_step_reward(request, action_subset)
-            combined_step_reward = np.mean(final_step_reward_list)
+            headroom_reward = self._collapse_step_reward(final_step_reward_list, action_subset)
+            combined_step_reward = headroom_reward   # default; may be adjusted by REWARD_MODE below
 
             # Track observed latency (minimum among selected servers)
             if len(action_subset) > 0 and hasattr(request, 'total_processing_delay'):
@@ -682,8 +914,16 @@ class Controller:
             if len(action_subset) > 0 and hasattr(request, 'total_processing_delay'):
                 sorted_list = sorted(l)[0]
                 observed_latency = sorted_list[0]
-                request.combination = sorted_list[1]
+                request.contention_str = sorted_list[1]  # [SAFETAIL][FIX][D-19] not .combination
                 self.episode_latencies.append(observed_latency)
+
+                # [SAFETAIL][REWARD][FIX][B4][M-03] optional tau-referenced
+                # tail-latency term. REWARD_MODE in {headroom, tau, headroom+tau};
+                # "headroom" (default) reproduces the pre-B4 reward exactly.
+                mode = getattr(constants, "REWARD_MODE", "headroom")
+                if mode in ("tau", "headroom+tau"):
+                    combined_step_reward = self._apply_tau_term(
+                        headroom_reward, request, action_subset, observed_latency, mode)
                 # l.append([request_total_delay[i], combined_str, computation_delay_for_node, propagation_delay_for_node, tramission_delay_for_node])
 
                 # Track deviation from median
@@ -717,16 +957,49 @@ class Controller:
                 f.write(f"{self.current_episode},{self.current_step},{combined_step_reward:.6f}\n")
         except Exception as e:
             print(f"[CONTROLLER] Failed to log step reward: {e}")
-        if self.BASELINE_MODE == "safetail":
-            # store experience
+        if self.policy is not None:
+            # [SAFETAIL][SEAM][M-02] Feed the realised reward back; keep episodic
+            # bookkeeping alive so latency/episode logs still populate.
+            try:
+                self.policy.observe(self._pending_policy_ctx, action_subset, float(combined_step_reward))
+            except Exception as e:
+                print(f"[CONTROLLER, !] policy.observe failed: {type(e).__name__} - {e}")
+            try:
+                self.step_rewards.append(combined_step_reward)
+            except Exception:
+                pass
+
+        elif self.BASELINE_MODE == "safetail":
+            # [SAFETAIL][REPLAY][FIX][D-04][D-05] store ARRAYS, not the live
+            # Request. s_t was snapshotted before scheduling (estimates only);
+            # s_{t+1} is snapshotted now, post-action (realised delays), so the
+            # two are genuinely different (D-05) and s_t carries no outcome (D-04).
             try:
                 if not self.testing_phase_active:
+                    s_tp1_arr = None
+                    try:
+                        s_tp1_arr = request_to_state_array(request, self.agent.remove_nan_in_state)
+                    except Exception as e:
+                        print(f"[SAFETAIL][REPLAY][D-04] s_t+1 snapshot failed: {type(e).__name__} - {e}")
                     self.step_experiences.append({
-                        "state": request,
+                        "state_arr": s_t_arr,
                         "action": action_index,
-                        "reward": combined_step_reward,
-                        "next_state": request
+                        "reward": float(combined_step_reward),   # per-step credit (D-06)
+                        "next_state_arr": s_tp1_arr,
                     })
+                    if _AUDIT_REPLAY and s_t_arr is not None:
+                        try:
+                            AUDIT_TRANSITIONS.append({
+                                "episode": int(self.current_episode),
+                                "s_t": np.asarray(s_t_arr, dtype=float).copy(),
+                                "s_tp1": (None if s_tp1_arr is None
+                                          else np.asarray(s_tp1_arr, dtype=float).copy()),
+                                "reward": float(combined_step_reward),
+                                "realised_delay": np.asarray(
+                                    getattr(request, "total_processing_delay", []), dtype=float).copy(),
+                            })
+                        except Exception:
+                            pass
             except Exception as e:
                 print(f"[CONTROLLER, !] Failed to store experience: {type(e).__name__} - {e}")
 
@@ -781,7 +1054,14 @@ class Controller:
             f"Reward={episodic_reward:.4f}"
         )
 
-        if self.BASELINE_MODE == "safetail":
+        if self.policy is not None:
+            try:
+                self.policy.finish_episode(int(self.current_episode))
+            except Exception as e:
+                print(f"[CONTROLLER, !] policy.finish_episode failed: {type(e).__name__} - {e}")
+            self.agent.rewards = np.append(self.agent.rewards, episodic_reward)
+
+        elif self.BASELINE_MODE == "safetail":
 
             if self.testing_phase_active:
                 # continue reward plots during testing
@@ -793,14 +1073,23 @@ class Controller:
                 )
 
             else:
-                # normal training memory store
+                # [SAFETAIL][REPLAY][FIX][D-06] keep the PER-STEP reward and add
+                # the episodic signal as a broadcast bonus R_ep/N -- do NOT
+                # overwrite r_t with episodic_reward (which is what discarded all
+                # per-step credit).
+                n_steps = max(1, len(self.step_experiences))
+                ep_bonus = float(episodic_reward) / n_steps
+                stored = 0
                 for exp in self.step_experiences:
-                    self.agent.store(
-                        state_request=exp['state'],
-                        action=exp['action'],
-                        reward=episodic_reward,
-                        next_state_request=exp['next_state']
+                    if exp.get("state_arr") is None or exp.get("next_state_arr") is None:
+                        continue
+                    self.agent.store_arrays(
+                        exp["state_arr"], exp["action"],
+                        exp["reward"] + ep_bonus, exp["next_state_arr"],
                     )
+                    stored += 1
+                print(f"[SAFETAIL][REPLAY][D-06] stored {stored}/{len(self.step_experiences)} "
+                      f"transitions (per-step r + R_ep/{n_steps}={ep_bonus:.4f})")
 
                 if len(self.agent.memory) >= self.agent.batch_size:
                     print(f"[CONTROLLER, EPISODE {self.current_episode}] Training agent...")
@@ -929,6 +1218,8 @@ class Controller:
         print("[CONTROLLER] Testing phase started.")
 
     def generate_testing_plots(self):
+        # [SAFETAIL][DEAD][D-29][M-14] empty stub -- testing-phase results are not
+        # plotted at all. Implement or drop the split's plotting claim (B9/M-14).
         pass
 
     def generate_plots(self):
@@ -936,6 +1227,8 @@ class Controller:
         Generate all training plots and save metrics summary.
         Called periodically during training.
         """
+        if getattr(constants, "SMOKE", False):
+            return  # [SAFETAIL][PLOT][smoke] plan.md 9.4: smoke runs produce no plots
         episode_str = f"ep{self.current_episode:04d}"
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         save_dir = self.plot_dir / episode_str
@@ -969,6 +1262,8 @@ class Controller:
         Generate final comprehensive plots at the end of training.
         These are higher quality and include all dataset.
         """
+        if getattr(constants, "SMOKE", False):
+            return  # [SAFETAIL][PLOT][smoke] plan.md 9.4
         print("\n" + "=" * 60)
         print("[CONTROLLER] 🎨 Generating final training visualizations...")
         print("=" * 60)
@@ -1004,9 +1299,7 @@ class Controller:
             print(f"[CONTROLLER] ⚠️ Failed to generate final plots: {type(e).__name__} - {e}")
 
     def export_training_data(self, filepath):
-        """
-        Export all training metrics to CSV for external analysis.
-        """
+        """[SAFETAIL][DEAD][D-29][M-14] orphan; body is entirely commented out."""
         # try:
         #     # Determine the maximum length
         #     max_len = max(
@@ -1053,7 +1346,7 @@ class Controller:
         pass
 
     def save_checkpoint(self):
-        """Save model and metrics."""
+        """[SAFETAIL][DEAD][D-29] orphan -- only referenced from a commented-out call."""
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         save_dir = Path("training_logs")
         save_dir.mkdir(exist_ok=True)
@@ -1107,16 +1400,10 @@ class Controller:
                 try:
                     with self.lock:
                         self.process_step(request)
-
-                        # request combination type
-                        combination = request.combination[0]
-                        # Track request completion counts for different combination types (for use in episodic reward shaping)
-                        if (combination == "s"):
-                            self.request_s_done += 1
-                        elif (combination == "d"):
-                            self.request_d_done += 1
-                        elif (combination == "p"):
-                            self.request_p_done += 1
+                        # [SAFETAIL][REWARD][FIX][D-20] the unconditional
+                        # request_*_done increments that used to live here are
+                        # gone -- completion is now counted deadline-conditionally
+                        # inside compute_step_reward() where T is known.
 
                 except Exception as e:
                     # Fail-soft: skip bad request, continue episode

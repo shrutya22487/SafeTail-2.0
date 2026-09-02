@@ -1,14 +1,14 @@
-import importlib
 import pickle
 import random
-import sys
 import time
 from pathlib import Path
 from typing import Any, Union
 
 import pandas as pd
 
+import constants
 import user
+from regressors import load_all  # [SAFETAIL][REGRESSOR][FIX][D-02] one parameterised predictor
 
 MAX_CONCURRENT_REQUESTS = 4
 
@@ -38,45 +38,26 @@ class Server:
         self.requests = []
         self.active_requests = []
 
-        self._load_predictors_from_regressor_folder(base_dir, server_index)
+        self._load_predictors(server_index)
 
-    def _load_predictors_from_regressor_folder(self, base_dir: Path, server_index: int):
-        self.predictors = {'d': None, 's': None, 'p': None}
-        reg_folder = base_dir / f"server{self.server_index}_regressor"
-        if not reg_folder.exists() or not reg_folder.is_dir():
-            return
+    def _load_predictors(self, server_index: int):
+        """
+        [SAFETAIL][REGRESSOR][FIX][D-02][D-02b][D-02c]
+        Load this server's OWN {detect,speech,predict} trace predictors.
 
-        sys.path.insert(0, str(reg_folder))
-        try:
-            # detect
-            try:
-                detect_mod = importlib.import_module("detect_predictor")
-                DetectCls = getattr(detect_mod, "DetectPredictor", None)
-                if DetectCls:
-                    self.predictors['d'] = DetectCls()
-            except Exception:
-                self.predictors['d'] = None
+        Was `_load_predictors_from_regressor_folder`: it `sys.path.insert`ed each
+        `src/server{i}_regressor/` dir and `import_module("detect_predictor")` --
+        identical module names meant `sys.modules` returned server 1's class for
+        every server (D-02b), and every failure fell through to a contention-free
+        single-letter CSV lookup (D-02c). Now there is one module and the server
+        index is an argument.
 
-            # speech
-            try:
-                speech_mod = importlib.import_module("speech_predictor")
-                SpeechCls = getattr(speech_mod, "SpeechPredictor", None)
-                if SpeechCls:
-                    self.predictors['s'] = SpeechCls()
-            except Exception:
-                self.predictors['s'] = None
-
-            # predict
-            try:
-                predict_mod = importlib.import_module("predict_predictor")
-                PredictCls = getattr(predict_mod, "PredictPredictor", None)
-                if PredictCls:
-                    self.predictors['p'] = PredictCls()
-            except Exception:
-                self.predictors['p'] = None
-
-        finally:
-            pass
+        A load failure RAISES unless constants.ALLOW_DEGRADED_PREDICTORS is True,
+        in which case it is logged with [DEGRADED][D-02c] and counted in the run
+        manifest (a run with any [DEGRADED] count > 0 is not publishable -- G5).
+        """
+        allow = bool(getattr(constants, "ALLOW_DEGRADED_PREDICTORS", False))
+        self.predictors = load_all(server_index, allow_degraded=allow)
 
     def print_active_requests(self):
         print(f"Server {self.server_index} Active Requests:")
@@ -105,37 +86,56 @@ class Server:
                 types.append('')
         return types
 
+    def _csv_lookup(self, combined_str: str):
+        """
+        [SAFETAIL][SERVER][FIX][D-02c] CSV fallback keyed on the FULL contention
+        string, never on the bare letter. Returns the trace's Total Processing
+        Time for that exact contention row, or None if absent. The old code
+        matched `Combination == letter`, i.e. it silently returned the
+        CONTENTION-FREE latency whenever a predictor failed.
+        """
+        key = str(combined_str).strip().lower()
+        mask = self.server_data['Combination'].astype(str).str.strip().str.lower() == key
+        if mask.any():
+            t = self.server_data[mask].iloc[0].get("Total Processing Time (sec)", None)
+            if t is not None and not pd.isna(t):
+                return float(t)
+        return None
+
     def _predict_using_letter(self, letter: str, combined_str: str) -> float:
         if not letter:
             return 0.0
+        allow = bool(getattr(constants, "ALLOW_DEGRADED_PREDICTORS", False))
 
         predictor = self.predictors.get(letter.lower())
         if predictor is None:
-            try:
-                mask = self.server_data['Combination'].astype(str).str.strip().str.lower() == letter.lower()
-                if mask.any():
-                    row = self.server_data[mask].iloc[0]
-                    t = row.get("Total Processing Time (sec)", None)
-                    if t is not None and not pd.isna(t):
-                        return float(t)
-            except Exception:
-                pass
-            return 0.0
+            # only reachable when ALLOW_DEGRADED_PREDICTORS made load_all() tolerant
+            val = self._csv_lookup(combined_str)
+            if val is not None:
+                return val
+            raise RuntimeError(
+                f"[SAFETAIL][SERVER][DEGRADED][D-02c] server={self.server_index} letter={letter!r}: "
+                f"no predictor and no trace row for contention string {combined_str!r}"
+            )
 
         try:
-            # print(f"\n[SERVER]    Using predictor for letter '{letter}' with combined string '{combined_str}'\n")
             return float(predictor.predict_from_combination(combined_str))
-        except Exception:
-            try:
-                mask = self.server_data['Combination'].astype(str).str.strip().str.lower() == letter.lower()
-                if mask.any():
-                    row = self.server_data[mask].iloc[0]
-                    t = row.get("Total Processing Time (sec)", None)
-                    if t is not None and not pd.isna(t):
-                        return float(t)
-            except Exception:
-                pass
-            return 0.0
+        except Exception as exc:
+            val = self._csv_lookup(combined_str)
+            if val is not None:
+                if allow:
+                    print(f"[SAFETAIL][SERVER][DEGRADED][D-02c] server={self.server_index} "
+                          f"predictor raised for {combined_str!r}; using trace row. ({exc})")
+                    try:
+                        from _safetail_log import note_degraded
+                        note_degraded("D-02c")
+                    except Exception:
+                        pass
+                    return val
+            raise RuntimeError(
+                f"[SAFETAIL][SERVER][DEGRADED][D-02c] server={self.server_index} letter={letter!r} "
+                f"combined={combined_str!r}: predictor failed and no trace row"
+            ) from exc
 
     def _choose_first_letter_for_regressor(self, request):
         existing_types = self._collect_visible_types()
@@ -212,7 +212,9 @@ class Server:
         start_time = current_time
         finish_time = start_time + total_delay
 
-        request.combination = combined_str
+        # [SAFETAIL][SERVER][FIX][D-19] record contention string WITHOUT clobbering
+        # the request-type letter.
+        request.contention_str = combined_str
 
         self.requests.append(request)
         self.active_requests.append({

@@ -82,7 +82,12 @@ class Request:
     ):
         self.request_id = int(request_id)
         self.process_id = int(process_id)
+        # [SAFETAIL][FIX][D-19] `combination` is the IMMUTABLE request-type letter
+        # (s|d|p). The per-schedule contention string (e.g. "dps") now lives in
+        # `contention_str` and never overwrites `combination`. This is what fixes
+        # the 192-distinct-values `request_type` column in latency_log.csv.
         self.combination = combination
+        self.contention_str = ""
         self.deadline = np.asarray([], dtype=float)
         self.arrival_time = time.time() * 1000.0
         self.queue_waiting_time = 0.0
